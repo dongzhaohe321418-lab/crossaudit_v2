@@ -16,6 +16,7 @@ Keys go to a 0600 file outside the repository and are never echoed, never put in
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -69,7 +70,7 @@ VENDOR_MODELS = {
 TYPE_IT = "__type__"
 
 
-def choose_model(vendor: str, default: str) -> str:
+def choose_model(vendor: str, default: str, *, role: str = "Auditor") -> str:
     """Pick a model from a list, or type one.
 
     Typing an exact model id from memory is the step people get wrong, and a
@@ -81,7 +82,7 @@ def choose_model(vendor: str, default: str) -> str:
         return tui.text("Model id", default, placeholder="exactly as the vendor spells it")
     options = [tui.Option(m, m, hint) for m, hint in known]
     options.append(tui.Option(TYPE_IT, "something else", "type the id yourself"))
-    picked = tui.select("Auditor model:", options, default=0)
+    picked = tui.select(f"{role} model:", options, default=0)
     if picked == TYPE_IT:
         return tui.text("Model id", default,
                         placeholder="exactly as the vendor spells it")
@@ -107,12 +108,13 @@ def read_keys_file(path: Path | None = None) -> dict[str, str]:
     if not path.is_file():
         return out
     for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line.startswith("export ") or "=" not in line:
+        try:
+            words = shlex.split(line, comments=True, posix=True)
+        except ValueError:
             continue
-        name, _, value = line[len("export "):].partition("=")
-        name = name.strip()
-        value = value.strip().strip('"').strip("'")
+        if len(words) != 2 or words[0] != "export" or "=" not in words[1]:
+            continue
+        name, _, value = words[1].partition("=")
         if name.startswith("CROSSAUDIT_") and value:
             out[name] = value
     return out
@@ -140,15 +142,10 @@ def load_keys_into_env() -> list[str]:
 def write_keys(pairs: dict[str, str]) -> Path:
     """Append keys to a 0600 file. Existing values are kept unless replaced."""
     path = keys_file()
-    existing: dict[str, str] = {}
-    if path.exists():
-        for line in path.read_text().splitlines():
-            if line.strip().startswith("export ") and "=" in line:
-                k, _, v = line.partition("=")
-                existing[k.replace("export ", "").strip()] = v
-    existing.update({k: f'"{v}"' for k, v in pairs.items() if v})
+    existing = read_keys_file(path)
+    existing.update({k: v for k, v in pairs.items() if v})
     body = "# CrossAudit credentials. Never commit this file.\n" + "\n".join(
-        f"export {k}={v}" for k, v in sorted(existing.items())) + "\n"
+        f"export {k}={shlex.quote(v)}" for k, v in sorted(existing.items())) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
     path.chmod(0o600)
@@ -200,6 +197,59 @@ def prepare(target: Path) -> list[str]:
     return done
 
 
+def commit_setup(target: Path, paths: list[str]) -> str:
+    """Version only the files setup owns and return the new commit hash.
+
+    An existing repository may already have unrelated changes staged.  A plain
+    ``git commit`` would silently sweep those into CrossAudit's setup commit,
+    so the pathspec is repeated with ``--only``.  New git users often have no
+    author configured yet; in that case install an explicit repository-local
+    automation identity.  The local setting matters beyond this one commit:
+    later build rounds also commit their work, and must not fail only after the
+    user has finished setup.
+    """
+    owned = sorted(set(paths))
+    add = subprocess.run(["git", "add", "--", *owned], cwd=str(target),
+                         capture_output=True, text=True)
+    if add.returncode != 0:
+        raise ConfigDenial(f"could not stage the setup files: {add.stderr.strip()[:200]}")
+
+    name = subprocess.run(["git", "config", "user.name"], cwd=str(target),
+                          capture_output=True, text=True).stdout.strip()
+    email = subprocess.run(["git", "config", "user.email"], cwd=str(target),
+                           capture_output=True, text=True).stdout.strip()
+    for key, current, fallback in (
+        ("user.name", name, "CrossAudit"),
+        ("user.email", email, "crossaudit@local.invalid"),
+    ):
+        if current:
+            continue
+        configured = subprocess.run(["git", "config", key, fallback], cwd=str(target),
+                                    capture_output=True, text=True)
+        if configured.returncode != 0:
+            raise ConfigDenial(f"could not configure the local git identity: "
+                               f"{configured.stderr.strip()[:200]}")
+
+    changed = subprocess.run(["git", "diff", "--cached", "--quiet", "--", *owned],
+                             cwd=str(target))
+    if changed.returncode == 0:
+        # Re-running --force with byte-identical answers has nothing to version.
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(target),
+                              capture_output=True, text=True).stdout.strip()
+    if changed.returncode != 1:
+        raise ConfigDenial("could not inspect the staged setup files")
+
+    commit = subprocess.run(
+        ["git", "commit", "-q", "--only", "-m",
+         "crossaudit: initialize supervised project", "--", *owned],
+        cwd=str(target), capture_output=True, text=True)
+    if commit.returncode != 0:
+        raise ConfigDenial(f"could not commit the setup files: "
+                           f"{commit.stderr.strip()[:200]}")
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(target),
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
 def _distil(description: str, provider: str, model: str, base_url: str):
     """Draft rules on the auditor-side model, before any config file exists."""
     from .. import constitution as const_mod
@@ -227,6 +277,7 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
                "Two models from different vendors, one ledger in git. "
                "Four questions, then it runs.")
 
+    gitignore_existed = (target / ".gitignore").exists()
     for line in prepare(target):
         tui.ok(line)
 
@@ -246,8 +297,8 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
 
     # ---- 2. the generator --------------------------------------------------
     tui.step(2, 4, "Who generates")
-    tui.note("CrossAudit does not drive your generator; it needs the vendor name "
-             "so heterogeneity can be asserted, and refused when violated.")
+    tui.note("The model that writes each build round. Its vendor is also recorded "
+             "so same-source supervision can be refused before either key is used.")
     others = [v for v in VENDORS if v not in (auditor_vendor, "other")]
     generator_vendor = tui.select(
         "Generator vendor:",
@@ -258,6 +309,13 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
             f"auditor and generator are both {auditor_vendor!r}: that is "
             f"same-source supervision, which is the thing this protocol exists "
             f"to avoid")
+    generator_provider = ""
+    generator_model = ""
+    if generator_vendor != "human":
+        generator_provider, generator_default_model, _generator_url = VENDORS[
+            generator_vendor]
+        generator_model = choose_model(generator_vendor, generator_default_model,
+                                       role="Generator")
 
     # ---- 3. keys -----------------------------------------------------------
     tui.step(3, 4, "API keys")
@@ -269,7 +327,7 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
     generator_key = ""
     if generator_vendor != "human":
         generator_key = tui.secret(f"{generator_vendor} key — the generator "
-                                   f"(optional)")
+                                   f"(leave blank to export it yourself)")
     written = None
     if auditor_key or generator_key:
         written = write_keys({"CROSSAUDIT_AUDITOR_KEY": auditor_key,
@@ -333,13 +391,26 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
         auditor_model=model or default_model,
         base_url_line=f"  base_url: {base_url}\n" if base_url else "",
         generator_vendor=generator_vendor,
+        generator_details=(
+            f"  provider: {generator_provider}\n"
+            f"  model: {generator_model}\n"
+            f"  key_env: CROSSAUDIT_GENERATOR_KEY"
+            if generator_vendor != "human" else
+            "  # Human-written changes are committed first, then `crossaudit run`."
+        ),
         permissive_minimum="false" if mode == "local" else "true",
         state_dir=".crossaudit",
     ))
     tui.ok(f"{CONFIG_NAME} written")
-    write_tree(target, SCIENCE_TREE)
+    owned = [CONFIG_NAME, const_name]
+    if not gitignore_existed:
+        owned.append(".gitignore")
+    owned.extend(write_tree(target, SCIENCE_TREE))
     if mode == "local":
-        write_tree(target, AUDIT_TREE)
+        owned.extend(write_tree(target, AUDIT_TREE))
+
+    setup_commit = commit_setup(target, owned)
+    tui.ok(f"setup committed — {setup_commit[:12]}")
 
     # ---- what to do next ---------------------------------------------------
     tui.banner("Ready", str(target))
@@ -365,4 +436,5 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
             tui.warn(f"{detail} — install from https://cli.github.com first")
 
     return {"config": str(cfg_path), "constitution": str(const_path),
-            "keys_file": str(written) if written else None, "mode": mode}
+            "keys_file": str(written) if written else None, "mode": mode,
+            "setup_commit": setup_commit}

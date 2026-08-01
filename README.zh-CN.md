@@ -70,7 +70,7 @@ lives behind `init`.
 验证:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.4 (receipt schema 2)
+crossaudit --version     # crossaudit 2.8.0 (receipt schema 2)
 ```
 
 <details>
@@ -120,7 +120,7 @@ crossaudit init my-project
 | 问 | 说明 |
 |---|---|
 | **1. 谁审计** | 先选厂商,再从列表里选模型 |
-| **2. 谁生成** | **必须和审计端不同**,选一样会被当场拒绝——那是同源监督,正是本协议要防的 |
+| **2. 谁生成** | 选择厂商和模型;厂商**必须和审计端不同**,选一样会被当场拒绝——那是同源监督,正是本协议要防的 |
 | **3. 两个 key** | **输入时可见**,好让你看见有没有输错;写进 `~/.crossaudit-keys.env`(权限 600),**永不进仓库**。`CROSSAUDIT_HIDE_KEYS=1` 可隐藏 |
 | **4. 项目是什么、最怕出什么错** | 你说人话,系统蒸馏成编号规则,**展示给你看,点头才落盘** |
 
@@ -179,6 +179,8 @@ crossaudit build "写一节关于光伏度电成本的内容,数字必须和数�
 ```
 
 执行端写、审计端判、findings 打回去重写,直到通过或交给你(默认最多三轮)。
+原始要求会提交为 `TASK.md`;starter Constitution 的 `CA-TASK-001` 要求审计端逐项
+对照任务,所以产物即使内部一致,也不能在偷偷替换数值、文件、命令或环境后通过。
 **每轮都是 commit,每次裁定都有报告和回执。**
 
 ### 其余时候:对着一个黑箱说话
@@ -346,7 +348,7 @@ agent 之间**追责。
 |---|---|
 | `CROSSAUDIT_AUDITOR_KEY` | 审计端密钥(必需) |
 | `CROSSAUDIT_GENERATOR_KEY` | 执行端密钥(`build` 需要) |
-| `CROSSAUDIT_GENERATOR_MODEL` | 执行端模型名(`build` 必需) |
+| `CROSSAUDIT_GENERATOR_MODEL` | 覆盖 `init` 时选择的执行端模型 |
 | `CROSSAUDIT_GENERATOR_PROVIDER` | 执行端 provider(默认按厂商推断) |
 | `CROSSAUDIT_GENERATOR_BASE_URL` | 执行端自定义 endpoint |
 | `CROSSAUDIT_KEYS_FILE` | 改密钥文件位置(沙箱用) |
@@ -412,9 +414,10 @@ pip uninstall crossaudit
 
 ## 状态 · Status
 
-`2.7.4`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
-争议、领域中立检查包、检查包插件、双仓向导、准入档位自证、实时推送的浏览器面板、
-后台常驻与重连。未落地:enforced 档的实地证据、PyPI 发行。
+`2.8.0`,257 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
+争议、领域中立检查包、检查包插件、双仓向导、准入档位自证、提交任务逐项约束、现代
+OpenAI/Anthropic 模型参数兼容、事件驱动的实时浏览器面板、后台常驻与重连。未落地:
+enforced 档的实地证据、PyPI 发行。
 
 ## 许可 · License
 

@@ -112,6 +112,45 @@ def test_offline_run_never_mints_a_pass(science, cfg, transcripts):
     assert outcome.verdict == "DCL_ONLY"
 
 
+def test_committed_task_is_visible_to_the_auditor_and_bound_by_the_prompt():
+    from crossaudit.auditor import prompt as pm
+    from crossaudit.scaffold import read as read_template
+
+    constitution = read_template("AUDIT_RULES.md")
+    assert "### CA-TASK-001" in constitution
+    files = {"experiments/demo/results.json": b'{"quantities": []}'}
+    dcl = {"verdict": "PASS", "total_hard_failures": 0,
+           "findings": [], "notes": []}
+    task = "The convergence threshold must be exactly 0.001."
+
+    rendered, bounded, digest_one = pm.build(
+        constitution, "a" * 40, dcl, files, task)
+    _other, _bounded, digest_two = pm.build(
+        constitution, "a" * 40, dcl, files,
+        "The convergence threshold must be exactly 0.1.")
+
+    assert not bounded
+    assert "COMMITTED TASK REQUIREMENTS" in rendered and task in rendered
+    assert "CA-TASK-001" in pm.SYSTEM
+    assert digest_one != digest_two
+
+
+def test_dcl_only_receipt_can_be_verified_but_not_admitted(
+        science, cfg, transcripts):
+    """Verification proves bindings; it is not a synonym for admission."""
+    sha = write_increment(science, GOOD_RESULTS, "Fine.", "clean")
+    outcome, cycle, store = _audit(cfg, sha, transcripts, None, offline=True)
+    receipt, _ledger = _receipt_for(cfg, sha, cycle, outcome)
+
+    evidence = verify(receipt, science_root=science, audit_root=science,
+                      expect_repo=cfg.science_repo, expect_sha=sha, cfg=cfg)
+
+    assert evidence["verified"] and not evidence["admission_ready"]
+    assert any("DCL_ONLY" in reason for reason in evidence["admission_shortfalls"])
+    with pytest.raises(IntegrityDenial, match="DCL_ONLY"):
+        admit(receipt, store, evidence, cfg=cfg)
+
+
 def test_replay_provider_pass_is_marked_non_evidential(science, cfg, transcripts):
     """A fixture may exercise the loop; it may never look like an audit."""
     sha = write_increment(science, GOOD_RESULTS, "Fine.", "clean")
@@ -163,15 +202,17 @@ def test_cross_tier_replay_is_refused(science, cfg, transcripts, evidential):
     """A receipt minted where both keys shared a process cannot admit into a
     deployment that requires permissive isolation."""
     sha = write_increment(science, GOOD_RESULTS, "Fine.", "clean")
-    outcome, cycle, _s = _audit(cfg, sha, transcripts, PASS_REPLY)
+    outcome, cycle, store = _audit(cfg, sha, transcripts, PASS_REPLY)
     receipt, _l = _receipt_for(cfg, sha, cycle, outcome, mode="local")
     assert receipt["isolation"]["permissive"] is False
     import dataclasses
     strict = dataclasses.replace(cfg, isolation_minimum={
         "parametric": True, "contextual": True, "permissive": True})
+    evidence = verify(receipt, science_root=science, audit_root=science,
+                      expect_repo=cfg.science_repo, expect_sha=sha, cfg=strict)
+    assert not evidence["admission_ready"]
     with pytest.raises(IntegrityDenial, match="isolation evidence is weaker"):
-        verify(receipt, science_root=science, audit_root=science,
-               expect_repo=cfg.science_repo, expect_sha=sha, cfg=strict)
+        admit(receipt, store, evidence, cfg=strict)
 
 
 def test_unversioned_constitution_is_refused(science, cfg, transcripts):

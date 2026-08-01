@@ -209,6 +209,11 @@ def _looks_like_a_model_problem(said: str) -> bool:
     it exists for.
     """
     low = said.lower().strip()
+    # A vendor may mention "this model" while rejecting a request parameter.
+    # That is an adapter compatibility problem, not an unavailable model ID.
+    if any(field in low for field in
+           ("temperature", "max_tokens", "max_completion_tokens")):
+        return False
     if low.startswith("model:") or low.startswith("model "):
         return True
     return "model" in low and any(w in low for w in

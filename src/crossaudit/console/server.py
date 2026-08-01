@@ -41,10 +41,37 @@ from .progress import TRACKER
 from .streams import both
 
 IDLE_TIMEOUT_S = 900.0
-STREAM_POLL_S = 0.4          # how often the server re-derives, not how often it sends
+STREAM_POLL_S = 0.1          # fallback for changes made by another local process
 STREAM_HEARTBEAT_S = 15.0
 MAX_UTTERANCE = 4000
 ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+
+
+class _ChangeSignal:
+    """A versioned wake-up shared by every live SSE connection."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._version = 0
+
+    def current(self) -> int:
+        with self._condition:
+            return self._version
+
+    def notify(self) -> None:
+        with self._condition:
+            self._version += 1
+            self._condition.notify_all()
+
+    def wait(self, version: int, timeout: float) -> int:
+        with self._condition:
+            self._condition.wait_for(lambda: self._version != version,
+                                     timeout=timeout)
+            return self._version
+
+
+STREAM_CHANGES = _ChangeSignal()
+TRACKER.subscribe(STREAM_CHANGES.notify)
 
 
 def snapshot(cfg: Config) -> dict:
@@ -95,7 +122,7 @@ def snapshot(cfg: Config) -> dict:
     }
 
 
-def start_build(cfg: Config, task: str) -> dict:
+def start_build(cfg: Config, task: str, *, before_start=None) -> dict:
     """Run a build in the background so the browser can watch it happen.
 
     The loop is the same one the CLI runs — the console watches it, it does not
@@ -108,6 +135,10 @@ def start_build(cfg: Config, task: str) -> dict:
 
     preflight(cfg)
     resolved = resolve_task(cfg, task.split())
+    if before_start is not None:
+        # The console uses this seam to commit its routing decision before the
+        # worker thread can begin making generator/auditor commits.
+        before_start(resolved)
     run = TRACKER.start(resolved)
     daemon.mark_build(cfg, resolved)
 
@@ -139,9 +170,8 @@ def say(cfg: Config, text: str) -> dict:
 
     routing = router_mod.route(text, complete=talk_mod._auditor_complete(cfg),
                                context=talk_mod._context(cfg))
-    log = talk_mod._routing_path(cfg)
     if not routing.certain:
-        router_mod.record(log, routing, "asked for clarification")
+        talk_mod._record_routing(cfg, routing, "asked for clarification")
         return {"asked": True, "lane": routing.lane, "confidence": routing.confidence,
                 "reasoning": routing.reasoning,
                 "clarify": routing.clarify or "Is this about the work, or about the "
@@ -150,9 +180,17 @@ def say(cfg: Config, text: str) -> dict:
         if TRACKER.running:
             return ("a build is already running; watch it above, or wait for it "
                     "to finish")
-        started = start_build(cfg, routing.restated)
+        def record_before_start(resolved: str) -> None:
+            nonlocal route_recorded
+            talk_mod._record_routing(
+                cfg, routing, f"building: {resolved.splitlines()[0][:80]}")
+            route_recorded = True
+
+        started = start_build(cfg, routing.restated,
+                              before_start=record_before_start)
         return f"building: {started['task']}"
 
+    route_recorded = False
     lanes = {
         "amendment": lambda: talk_mod.lane_amendment(cfg, routing, assume_yes=True),
         "query": lambda: talk_mod.lane_query(cfg, routing),
@@ -164,10 +202,12 @@ def say(cfg: Config, text: str) -> dict:
     try:
         executed = lanes[routing.lane]()
     except Denial as exc:
-        router_mod.record(log, routing, f"denied: {exc.reason}")
+        if not route_recorded:
+            talk_mod._record_routing(cfg, routing, f"denied: {exc.reason}")
         return {"asked": False, "lane": routing.lane, "confidence": routing.confidence,
                 "reasoning": routing.reasoning, "executed": f"refused — {exc.reason}"}
-    router_mod.record(log, routing, executed)
+    if not route_recorded:
+        talk_mod._record_routing(cfg, routing, executed)
     return {"asked": False, "lane": routing.lane, "confidence": routing.confidence,
             "reasoning": routing.reasoning, "executed": executed}
 
@@ -237,6 +277,7 @@ def make_handler(cfg: Config, token: str, touch) -> type:
             self.end_headers()
             last_digest = ""
             last_beat = time.monotonic()
+            change_version = STREAM_CHANGES.current()
             try:
                 while True:
                     payload = json.dumps(snapshot(cfg), sort_keys=True)
@@ -252,7 +293,11 @@ def make_handler(cfg: Config, token: str, touch) -> type:
                         self.wfile.flush()
                         last_beat = now
                         touch()
-                    time.sleep(STREAM_POLL_S)
+                    # Progress produced in this process wakes every connection
+                    # immediately. The short timeout only catches git/controller
+                    # writes made by another local CrossAudit process.
+                    change_version = STREAM_CHANGES.wait(change_version,
+                                                         STREAM_POLL_S)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return                      # the tab closed; nothing to clean up
 
@@ -287,6 +332,9 @@ def make_handler(cfg: Config, token: str, touch) -> type:
             except Denial as exc:
                 self._deny(400, exc.reason)
                 return
+            # Routing, amendments, disputes and resolutions change files other
+            # than the in-memory progress tracker. Publish those immediately too.
+            STREAM_CHANGES.notify()
             self._send(json.dumps(result).encode(), "application/json")
 
         def log_message(self, *args) -> None:                       # noqa: D102

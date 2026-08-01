@@ -183,6 +183,123 @@ def test_preparing_twice_does_not_duplicate_the_ignore_rule(tmp_path: Path):
     assert (target / ".gitignore").read_text().count(".crossaudit/") == 1
 
 
+def test_setup_versions_the_rules_and_scaffold(tmp_path: Path, monkeypatch):
+    """Setup promises a replayable ledger, so it must leave a usable HEAD."""
+    target = tmp_path / "project"
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(tmp_path / "keys.env"))
+
+    summary = wizard.run(target, mode="local")
+
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    committed = subprocess.run(["git", "show", "--pretty=format:", "--name-only",
+                                "HEAD"], cwd=target, capture_output=True, text=True,
+                               check=True).stdout.splitlines()
+    assert summary["setup_commit"] == head
+    assert {"AUDIT_RULES.md", "crossaudit.yml", ".gitignore"} <= set(committed)
+    from crossaudit.config import load
+    cfg = load(target / "crossaudit.yml")
+    assert cfg.scope_dirs == ["experiments"]
+    assert cfg.generator_provider == "openai_compat"
+    assert cfg.generator_model == wizard.VENDOR_MODELS["openai"][0][0]
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=target,
+                          capture_output=True, text=True, check=True).stdout == ""
+    # A machine with no global git identity must not fail on the first build
+    # round after setup; the fallback is local to this new repository.
+    (target / "later.txt").write_text("later\n")
+    subprocess.run(["git", "add", "later.txt"], cwd=target, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "later"], cwd=target, check=True)
+    assert subprocess.run(["git", "config", "user.name"], cwd=target,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_setup_does_not_commit_unrelated_staged_work(tmp_path: Path, monkeypatch):
+    target = tmp_path / "existing"
+    target.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=target, check=True)
+    (target / "mine.txt").write_text("user work\n")
+    subprocess.run(["git", "add", "mine.txt"], cwd=target, check=True)
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(tmp_path / "keys.env"))
+
+    wizard.run(target, mode="local")
+
+    committed = subprocess.run(["git", "show", "--pretty=format:", "--name-only",
+                                "HEAD"], cwd=target, capture_output=True, text=True,
+                               check=True).stdout.splitlines()
+    status = subprocess.run(["git", "status", "--short"], cwd=target,
+                            capture_output=True, text=True, check=True).stdout
+    assert "mine.txt" not in committed
+    assert "A  mine.txt" in status
+
+
+def test_routing_decision_is_committed_without_user_staging(tmp_path: Path,
+                                                            monkeypatch):
+    from crossaudit.cli import talk
+    from crossaudit.config import load
+    from crossaudit.router import Routing
+
+    target = tmp_path / "project"
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(tmp_path / "keys.env"))
+    wizard.run(target, mode="local")
+    mine = target / "mine.txt"
+    mine.write_text("user work\n")
+    subprocess.run(["git", "add", "mine.txt"], cwd=target, check=True)
+    routing = Routing(utterance="build the demo", lane="generator",
+                      confidence=1.0, reasoning="work change",
+                      restated="build the demo")
+
+    talk._record_routing(load(target / "crossaudit.yml"), routing,
+                         "building: build the demo")
+
+    committed = subprocess.run(
+        ["git", "show", "--pretty=format:", "--name-only", "HEAD"], cwd=target,
+        capture_output=True, text=True, check=True).stdout.splitlines()
+    status = subprocess.run(["git", "status", "--short"], cwd=target,
+                            capture_output=True, text=True, check=True).stdout
+    assert committed == ["cycles/routing.jsonl"]
+    assert "A  mine.txt" in status
+
+
+def test_default_check_uses_the_declared_scope_and_skips_the_scaffold(
+        tmp_path: Path, monkeypatch, capsys):
+    import argparse
+
+    from crossaudit.cli.main import cmd_check
+    from crossaudit.errors import EXIT_OK
+
+    target = tmp_path / "project"
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(tmp_path / "keys.env"))
+    wizard.run(target, mode="local")
+    increment = target / "experiments" / "demo"
+    increment.mkdir()
+    (increment / "metadata.yml").write_text(
+        "code_version: v1\ninputs:\n  - input.csv@v1\n")
+    (increment / "results.json").write_text(
+        '{"quantities":[{"name":"x","value":1,"unit":"count",'
+        '"source":"input.csv@v1"}]}')
+    (increment / "SUMMARY.md").write_text("x is 1 count.\n")
+    # These would both block the old whole-repository traversal.
+    (target / ".git" / "results.json").write_text("{broken")
+
+    monkeypatch.chdir(target)
+    args = argparse.Namespace(path=None, sha=None, scope=None, json=False)
+    assert cmd_check(args) == EXIT_OK
+    output = capsys.readouterr().out
+    assert "verdict: PASS" in output
+    assert "TEMPLATE" not in output and ".git" not in output
+
+    subprocess.run(["git", "add", "experiments/demo"], cwd=target, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "demo"], cwd=target, check=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    from crossaudit.cli.main import _materialise_tree_scope
+    from crossaudit.config import load
+    files, _notes, scope = _materialise_tree_scope(load(), sha, None)
+    assert scope == "experiments"
+    assert "experiments/demo/results.json" in files
+    assert not any("TEMPLATE" in path for path in files)
+
+
 # ------------------------------------------------------- the README is a contract
 def test_every_command_the_readme_shows_actually_exists():
     """A README with a wrong command is worse than no README: the reader trusts
@@ -336,6 +453,22 @@ def test_the_keys_file_is_parsed_not_executed(tmp_path, monkeypatch):
     monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(f))
     assert wz.read_keys_file() == {"CROSSAUDIT_AUDITOR_KEY": "sk-a",
                                    "CROSSAUDIT_GENERATOR_KEY": "sk-b"}
+
+
+def test_written_keys_are_safe_to_source_even_with_shell_metacharacters(
+        tmp_path, monkeypatch):
+    from crossaudit.cli import wizard as wz
+
+    keys = tmp_path / "keys.env"
+    marker = tmp_path / "must-not-exist"
+    dangerous = f'sk-"$(touch {marker})"-value'
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(keys))
+
+    wz.write_keys({"CROSSAUDIT_AUDITOR_KEY": dangerous})
+
+    assert wz.read_keys_file() == {"CROSSAUDIT_AUDITOR_KEY": dangerous}
+    subprocess.run(["sh", "-c", f'. "{keys}"'], check=True)
+    assert not marker.exists()
 
 
 def test_a_key_the_wizard_stored_reaches_the_next_command(tmp_path, monkeypatch):
@@ -517,11 +650,102 @@ def test_the_shapes_vendors_actually_send_for_a_bad_model(said):
     "messages: at least one message is required",
     "invalid x-api-key",
     "max_tokens: must be greater than 0",
+    ("Unsupported value: 'temperature' does not support 0 with this model. "
+     "Only the default (1) value is supported."),
 ])
 def test_other_four_hundreds_are_not_blamed_on_the_model(said):
     from crossaudit.providers.base import _looks_like_a_model_problem
 
     assert not _looks_like_a_model_problem(said)
+
+
+@pytest.mark.parametrize("model,expected,absent,has_temperature", [
+    ("gpt-5-mini", "max_completion_tokens", "max_tokens", False),
+    ("o4-mini", "max_completion_tokens", "max_tokens", False),
+    ("gpt-4.1-mini", "max_tokens", "max_completion_tokens", True),
+])
+def test_openai_token_limit_parameter_matches_the_model_family(
+        model, expected, absent, has_temperature, monkeypatch):
+    from crossaudit.providers import openai_compat
+
+    captured = {}
+
+    def request(_url, payload, _headers, *, timeout):
+        captured.update(payload)
+        return {"choices": [{"message": {"content": "OK"}}]}, "request-id"
+
+    monkeypatch.setenv("CROSSAUDIT_TEST_KEY", "not-a-real-key")
+    monkeypatch.setattr(openai_compat, "request_json", request)
+
+    openai_compat.complete(
+        model=model,
+        system="system",
+        prompt="prompt",
+        key_env="CROSSAUDIT_TEST_KEY",
+        max_tokens=17,
+    )
+
+    assert captured[expected] == 17
+    assert absent not in captured
+    assert ("temperature" in captured) is has_temperature
+    if has_temperature:
+        assert captured["temperature"] == 0
+
+
+@pytest.mark.parametrize("model,has_temperature", [
+    ("claude-sonnet-5", False),
+    ("claude-opus-5", False),
+    ("claude-sonnet-4-5-20250929", True),
+])
+def test_anthropic_temperature_matches_the_model_generation(
+        model, has_temperature, monkeypatch):
+    from crossaudit.providers import anthropic
+
+    captured = {}
+
+    def request(_url, payload, _headers, *, timeout):
+        captured.update(payload)
+        return {"content": [{"type": "text", "text": "OK"}]}, "request-id"
+
+    monkeypatch.setenv("CROSSAUDIT_TEST_KEY", "not-a-real-key")
+    monkeypatch.setattr(anthropic, "request_json", request)
+
+    anthropic.complete(
+        model=model,
+        system="system",
+        prompt="prompt",
+        key_env="CROSSAUDIT_TEST_KEY",
+        max_tokens=17,
+    )
+
+    assert captured["max_tokens"] == 17
+    assert ("temperature" in captured) is has_temperature
+    if has_temperature:
+        assert captured["temperature"] == 0
+
+
+def test_anthropic_custom_loopback_needs_explicit_opt_in(monkeypatch):
+    from crossaudit.errors import ConfigDenial
+    from crossaudit.providers import anthropic
+
+    monkeypatch.setenv("CROSSAUDIT_TEST_KEY", "not-a-real-key")
+    monkeypatch.setattr(
+        anthropic,
+        "request_json",
+        lambda *_args, **_kwargs: (
+            {"content": [{"type": "text", "text": "OK"}]}, "request-id"),
+    )
+    kwargs = {
+        "model": "claude-sonnet-5",
+        "system": "system",
+        "prompt": "prompt",
+        "key_env": "CROSSAUDIT_TEST_KEY",
+        "base_url": "http://127.0.0.1:9999",
+    }
+
+    with pytest.raises(ConfigDenial, match="allow-custom-endpoint"):
+        anthropic.complete(**kwargs)
+    assert anthropic.complete(**kwargs, allow_custom=True).text == "OK"
 
 
 def test_a_bad_model_id_is_not_blamed_on_the_key():

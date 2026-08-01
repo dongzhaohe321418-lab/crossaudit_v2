@@ -98,6 +98,23 @@ def test_concurrent_steps_do_not_lose_entries():
     assert len(t.snapshot()["steps"]) == 200
 
 
+def test_every_progress_change_wakes_live_views():
+    t = Tracker()
+    changes = []
+    t.subscribe(lambda: changes.append(t.snapshot()))
+
+    t.start("x")
+    t.step("generator", "writing")
+    t.finish("passed")
+    t.clear()
+
+    assert len(changes) == 4
+    assert changes[0]["task"] == "x"
+    assert changes[1]["steps"][0]["text"] == "writing"
+    assert changes[2]["finished"] is True
+    assert changes[3] is None
+
+
 def test_elapsed_grows_while_running_and_freezes_when_done():
     t = Tracker()
     t.start("x")
@@ -184,3 +201,16 @@ def test_the_page_javascript_still_contains_its_regexes():
 
     assert r"/\s+/g" in PAGE          # would be mangled by a non-raw string
     assert r"[&<>\"]" in PAGE or '[&<>"]' in PAGE
+
+
+def test_console_has_one_primary_command_composer():
+    """The dashboard may grow more controls, but it must keep one obvious
+    write path so a task cannot be submitted twice by competing forms."""
+    from crossaudit.console.page import PAGE
+
+    assert PAGE.count('id="say"') == 1
+    assert PAGE.count('id="send"') == 1
+    assert '<textarea id="say"' in PAGE
+    assert "Command center" in PAGE
+    assert "Run task" in PAGE
+    assert "Shift+Enter adds a line" in PAGE

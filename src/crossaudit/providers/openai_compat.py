@@ -14,6 +14,23 @@ from .base import Reply, egress_check, read_key, request_json, sha256_text
 BUILTIN_ORIGIN = "https://api.openai.com"
 
 
+def _completion_token_parameter(model: str) -> str:
+    """Return the token-limit field accepted by this OpenAI model family.
+
+    GPT-5 and o-series chat-completions models reject the legacy
+    ``max_tokens`` field.  Older OpenAI-compatible services generally still
+    expect it, so keep the compatibility decision deliberately narrow.
+    """
+    lowered = model.lower()
+    modern_families = ("gpt-5", "o1", "o3", "o4")
+    return ("max_completion_tokens" if lowered.startswith(modern_families)
+            else "max_tokens")
+
+
+def _uses_modern_completion_controls(model: str) -> bool:
+    return _completion_token_parameter(model) == "max_completion_tokens"
+
+
 def complete(*, model: str, system: str, prompt: str, key_env: str,
              base_url: str | None = None, allow_custom: bool = False,
              max_tokens: int = 4096, timeout: float = 120.0) -> Reply:
@@ -23,11 +40,15 @@ def complete(*, model: str, system: str, prompt: str, key_env: str,
                  allow_insecure_localhost=True)
     payload = {
         "model": model,
-        "temperature": 0,
-        "max_tokens": max_tokens,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": prompt}],
     }
+    # GPT-5 and o-series models only accept their default temperature. Omitting
+    # the field preserves that default; legacy chat models retain deterministic
+    # temperature=0 behaviour.
+    if not _uses_modern_completion_controls(model):
+        payload["temperature"] = 0
+    payload[_completion_token_parameter(model)] = max_tokens
     headers = {"authorization": f"Bearer {read_key(key_env)}"}
     data, rid = request_json(url, payload, headers, timeout=timeout)
     try:

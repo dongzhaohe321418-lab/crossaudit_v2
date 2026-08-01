@@ -47,21 +47,29 @@ def _generator_complete(cfg: Config, allow_custom: bool):
     would put one key behind both ends of a loop whose whole premise is that the
     ends are separate.
     """
-    provider = os.environ.get("CROSSAUDIT_GENERATOR_PROVIDER") or (
-        "anthropic" if (cfg.generator_vendor or "").lower() == "anthropic"
-        else "openai_compat")
-    model = os.environ.get("CROSSAUDIT_GENERATOR_MODEL", "")
+    if (cfg.generator_vendor or "").lower() == "human":
+        raise ConfigDenial(
+            "this project selected a human generator: make and commit the change, "
+            "then run `crossaudit run`")
+    provider = (
+        os.environ.get("CROSSAUDIT_GENERATOR_PROVIDER")
+        or cfg.generator_provider
+        or ("anthropic" if (cfg.generator_vendor or "").lower() == "anthropic"
+            else "openai_compat")
+    )
+    model = os.environ.get("CROSSAUDIT_GENERATOR_MODEL") or cfg.generator_model or ""
     if not model:
         raise ConfigDenial(
             "the generator's model is not set: export CROSSAUDIT_GENERATOR_MODEL "
             "(and CROSSAUDIT_GENERATOR_PROVIDER if it is not the vendor default)")
-    key_env = "CROSSAUDIT_GENERATOR_KEY"
+    key_env = cfg.generator_key_env or "CROSSAUDIT_GENERATOR_KEY"
     if NEEDS_KEY.get(provider, True) and not os.environ.get(key_env, "").strip():
         raise ConfigDenial(
             f"the generator has no key in ${key_env}. The auditor's key is not "
             f"reused: one credential behind both ends would collapse the "
             f"separation the loop depends on")
-    base_url = os.environ.get("CROSSAUDIT_GENERATOR_BASE_URL") or None
+    base_url = (os.environ.get("CROSSAUDIT_GENERATOR_BASE_URL")
+                or cfg.generator_base_url or None)
     fn = get_provider(provider)
 
     def complete(*, system: str, prompt: str):

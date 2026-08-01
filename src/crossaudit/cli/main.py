@@ -799,7 +799,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="verb")
 
     i = sub.add_parser("init", help="guided setup: keys, rules, configuration")
-    i.add_argument("path", nargs="?", help="directory to set up (default: here)")
+    i.add_argument("path", nargs="?",
+                   help="directory to set up; created if it does not exist "
+                        "(default: here)")
     i.add_argument("--github", action="store_true", help="also plan the repository pair")
     i.add_argument("--force", action="store_true", help="overwrite an existing config")
     i.set_defaults(func=cmd_init)

@@ -1,39 +1,33 @@
-"""`crossaudit init` — the guided terminal setup.
+"""`crossaudit init` — the guided setup, from an empty directory to a first run.
 
-The operator's requirement: after installing, the program should walk the user
-through the two API keys, the audit Constitution, and the GitHub side, in the
-terminal. That guidance lives here, behind an explicit verb — never at install
-time (constraint 7).
+It creates the project if it does not exist, makes it a git repository if it is
+not one, settles who audits and who generates, takes the two keys, and turns a
+sentence about the project into the rules it will be judged by. Everything is
+shown before it is written, and the only thing here that reaches the network is
+the one call that drafts the rules.
 
-Keys are written to a 0600 file outside the repository and are never echoed,
-never placed in `crossaudit.yml`, and never committed. The wizard refuses to
-overwrite a non-empty target and prints exactly what it will do before doing it.
+Interactive when it can be — arrow keys, framed panels — and completely
+non-interactive when it cannot: piped stdin and CI take defaults rather than
+hanging on a keypress that will never arrive.
+
+Keys go to a 0600 file outside the repository and are never echoed, never put in
+`crossaudit.yml`, and never committed.
 """
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from ..config import CONFIG_NAME
 from ..errors import ConfigDenial, Denial
 from ..scaffold import AUDIT_TREE, CONFIG_TEMPLATE, SCIENCE_TREE, read, write_tree
+from . import tui
 
 DEFAULT_KEYS_FILE = Path.home() / ".crossaudit-keys.env"
 
-
-def keys_file() -> Path:
-    """Where credentials are stored.
-
-    Resolved at call time and overridable through CROSSAUDIT_KEYS_FILE, so a
-    sandbox can keep everything it creates inside one directory and be deleted
-    without residue.
-    """
-    return Path(os.environ.get("CROSSAUDIT_KEYS_FILE", DEFAULT_KEYS_FILE)).expanduser()
-
-VENDOR_PRESETS = {
+VENDORS = {
     "anthropic": ("anthropic", "claude-sonnet-4-5", "https://api.anthropic.com"),
     "openai": ("openai_compat", "gpt-5.1", "https://api.openai.com"),
     "google": ("openai_compat", "gemini-2.5-pro",
@@ -41,36 +35,17 @@ VENDOR_PRESETS = {
     "deepseek": ("openai_compat", "deepseek-chat", "https://api.deepseek.com"),
     "other": ("openai_compat", "", ""),
 }
+VENDOR_HINTS = {
+    "anthropic": "Claude", "openai": "GPT", "google": "Gemini",
+    "deepseek": "DeepSeek", "other": "any OpenAI-compatible endpoint",
+}
+# Kept for callers and tests that predate the arrow-key flow.
+VENDOR_PRESETS = VENDORS
 
 
-def _say(msg: str = "") -> None:
-    print(msg, file=sys.stdout)
-
-
-def _ask(prompt: str, default: str = "", *, secret: bool = False) -> str:
-    if not sys.stdin.isatty():
-        if default:
-            return default
-        raise ConfigDenial(f"init needs an answer for {prompt!r} but stdin is not a "
-                           f"terminal; pass the matching flag instead")
-    if secret:
-        import getpass
-        return getpass.getpass(f"{prompt}: ").strip()
-    suffix = f" [{default}]" if default else ""
-    got = input(f"{prompt}{suffix}: ").strip()
-    return got or default
-
-
-def _choose(prompt: str, options: list[str], default: str) -> str:
-    _say(f"\n{prompt}")
-    for i, opt in enumerate(options, 1):
-        _say(f"  {i}) {opt}")
-    raw = _ask("choose", default)
-    if raw.isdigit() and 1 <= int(raw) <= len(options):
-        return options[int(raw) - 1]
-    if raw in options:
-        return raw
-    raise ConfigDenial(f"{raw!r} is not one of {options}")
+def keys_file() -> Path:
+    """Where credentials are stored; overridable so a sandbox leaves no residue."""
+    return Path(os.environ.get("CROSSAUDIT_KEYS_FILE", DEFAULT_KEYS_FILE)).expanduser()
 
 
 def write_keys(pairs: dict[str, str]) -> Path:
@@ -91,31 +66,53 @@ def write_keys(pairs: dict[str, str]) -> Path:
     return path
 
 
-def github_plan(science: str, audit: str) -> list[str]:
-    """The exact commands the 0.3 wizard will run, printed for review first.
+def gh_available() -> tuple[bool, str]:
+    if not shutil.which("gh"):
+        return False, "gh CLI not installed"
+    proc = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        return False, "gh installed but not authenticated (run: gh auth login)"
+    return True, "gh authenticated"
 
-    0.1 plans; it does not touch anyone's GitHub account. That boundary is the
-    contract's, not shyness: remote writes wait for `--apply` in 0.3, and the
-    admission tier they produce has to be named honestly when they land.
-    """
+
+def github_plan(science: str, audit: str) -> list[str]:
+    """What pairing would do. Printed for review; `pair --apply` performs it."""
     return [
-        f"gh repo create {science} --private --clone   # then push the science shape:",
-        "#   experiments/ (README + TEMPLATE increment), cycles/README, crossaudit.yml",
-        f"gh repo create {audit} --private --clone     # then push the audit shape:",
-        "#   AUDIT_RULES.md (the Constitution), cycles/ ledger README",
-        f"gh secret set CROSSAUDIT_AUDITOR_KEY --repo {audit} < (your key, via stdin)",
-        f"gh api repos/{science}/branches/main/protection -X PUT ...  # required check",
-        "# then: crossaudit doctor --online   (re-reads the real rules, not the plan)",
+        f"gh repo create {science} --private",
+        f"gh repo create {audit} --private        rules and reports live here",
+        f"gh secret set CROSSAUDIT_AUDITOR_KEY --repo {audit}",
+        f"gh api repos/{science}/branches/main/protection -X PUT",
+        "crossaudit pair --apply                  does all of it, after showing you",
     ]
 
 
-def _distil_with_auditor(description: str, vendor: str, provider: str,
-                         model: str, base_url: str):
-    """Draft rules on the auditor-side model, before any config file exists.
+def prepare(target: Path) -> list[str]:
+    """Create the directory and make it a repository. Returns what it did.
 
-    The wizard has the answers but not yet a Config, so the provider is bound
-    from what was just chosen rather than loaded from disk.
+    The audit reads commits, so a project that is not a repository cannot be
+    audited at all — better to make it one here than to fail later with a
+    message about git.
     """
+    done: list[str] = []
+    if not target.exists():
+        target.mkdir(parents=True)
+        done.append(f"created {target}")
+    if not (target / ".git").is_dir():
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=str(target),
+                       check=True)
+        done.append("git init — the ledger is git, and an audit reads commits")
+    gitignore = target / ".gitignore"
+    current = gitignore.read_text() if gitignore.is_file() else ""
+    if ".crossaudit/" not in current:
+        with open(gitignore, "a") as fh:
+            fh.write("\n# CrossAudit's local state. The ledger is committed; this is not.\n"
+                     ".crossaudit/\n")
+        done.append("ignored .crossaudit/ — local state, not the ledger")
+    return done
+
+
+def _distil(description: str, provider: str, model: str, base_url: str):
+    """Draft rules on the auditor-side model, before any config file exists."""
     from .. import constitution as const_mod
     from ..providers import get_provider
 
@@ -130,100 +127,109 @@ def _distil_with_auditor(description: str, vendor: str, provider: str,
 
 
 def run(target: Path, *, mode: str, force: bool = False) -> dict:
-    """Interactive setup. Returns a summary of what was written."""
+    """Guided setup. Returns a summary of what was written."""
     target = target.resolve()
     cfg_path = target / CONFIG_NAME
     if cfg_path.exists() and not force:
         raise ConfigDenial(f"{cfg_path} already exists; refusing to overwrite "
                            f"(pass --force if you mean it)")
 
-    _say("CrossAudit setup")
-    _say("=" * 60)
-    _say("Three things to settle: who audits, what the rules are, and where the")
-    _say("ledger lives. Nothing here is sent anywhere; keys go to a 0600 file")
-    _say(f"at {keys_file()}, never into the repository.")
+    tui.banner("CrossAudit — setting up a supervised project",
+               "Two models from different vendors, one ledger in git. "
+               "Four questions, then it runs.")
 
-    # ---- 1. the auditor -----------------------------------------------------
-    _say("\n[1/4] The Auditor — the model that reviews your work.")
-    auditor_vendor = _choose("Auditor vendor:", list(VENDOR_PRESETS), "anthropic")
-    provider, default_model, default_url = VENDOR_PRESETS[auditor_vendor]
-    model = _ask("Auditor model", default_model)
+    for line in prepare(target):
+        tui.ok(line)
+
+    # ---- 1. the auditor ----------------------------------------------------
+    tui.step(1, 4, "Who audits")
+    tui.note("The model that reviews everything before it counts as done.")
+    auditor_vendor = tui.select(
+        "Auditor vendor:",
+        [tui.Option(v, v, VENDOR_HINTS[v]) for v in VENDORS], default=0)
+    provider, default_model, _url = VENDORS[auditor_vendor]
+    model = tui.text("Auditor model", default_model)
     base_url = ""
     if auditor_vendor == "other":
-        base_url = _ask("OpenAI-compatible base URL (e.g. https://host/v1)")
+        base_url = tui.text("OpenAI-compatible base URL",
+                            placeholder="https://host/v1")
         provider = "openai_compat"
 
-    _say("\n[2/4] The Generator — the model that produces the work being audited.")
-    _say("      CrossAudit does not drive it; it needs the vendor name so that")
-    _say("      heterogeneity (I1) can be asserted, and refused when violated.")
-    generator_vendor = _choose("Generator vendor:", list(VENDOR_PRESETS)[:-1] + ["human"],
-                               "anthropic" if auditor_vendor != "anthropic" else "openai")
+    # ---- 2. the generator --------------------------------------------------
+    tui.step(2, 4, "Who generates")
+    tui.note("CrossAudit does not drive your generator; it needs the vendor name "
+             "so heterogeneity can be asserted, and refused when violated.")
+    others = [v for v in VENDORS if v not in (auditor_vendor, "other")]
+    generator_vendor = tui.select(
+        "Generator vendor:",
+        [tui.Option(v, v, VENDOR_HINTS[v]) for v in others]
+        + [tui.Option("human", "human", "you write it yourself")], default=0)
     if generator_vendor.lower() == auditor_vendor.lower():
         raise ConfigDenial(
-            f"auditor and generator are both {auditor_vendor!r}: that is same-source "
-            f"supervision, which is the thing this protocol exists to avoid (I1)")
+            f"auditor and generator are both {auditor_vendor!r}: that is "
+            f"same-source supervision, which is the thing this protocol exists "
+            f"to avoid")
 
-    # ---- 2. keys ------------------------------------------------------------
-    _say("\n[3/4] API keys. Typed input is hidden and written to "
-         f"{keys_file()} (chmod 600).")
-    _say("      Leave blank to skip and export the variable yourself.")
-    auditor_key = _ask("Auditor API key", secret=True)
+    # ---- 3. keys -----------------------------------------------------------
+    tui.step(3, 4, "API keys")
+    tui.note(f"Hidden as you type, written to {keys_file()} with mode 600, never "
+             f"placed in the repository. Leave blank to export them yourself.")
+    auditor_key = tui.secret(f"{auditor_vendor} key — the auditor")
     generator_key = ""
     if generator_vendor != "human":
-        _say("      The generator key is stored for the full loop (0.5); it is not")
-        _say("      used by this version, and storing it here means one process can")
-        _say("      reach both — recorded in receipts as permissive: false.")
-        generator_key = _ask("Generator API key (optional, press enter to skip)",
-                             secret=True)
+        generator_key = tui.secret(f"{generator_vendor} key — the generator "
+                                   f"(optional)")
     written = None
     if auditor_key or generator_key:
         written = write_keys({"CROSSAUDIT_AUDITOR_KEY": auditor_key,
                               "CROSSAUDIT_GENERATOR_KEY": generator_key})
+        tui.ok(f"keys written to {written} (mode 600)")
 
-    # ---- 3. the Constitution -------------------------------------------------
-    # ---- 4. the rules, spoken rather than written (DESIGN.md P3) ------------
-    _say("\n[4/4] What this project is, and what you are most afraid of getting")
-    _say("      wrong. Say it in your own words — the audit rules get drafted")
-    _say("      from this, shown to you, and only committed if you agree.")
+    # ---- 4. the rules, spoken rather than written --------------------------
+    tui.step(4, 4, "What this is, and what would be a mistake")
+    tui.note("Say it in your own words. The rules are drafted from this, shown to "
+             "you, and committed only if you agree — you never write markdown.")
     const_name = "AUDIT_RULES.md"
     const_path = target / const_name
-    description = _ask("\n  your project, in a sentence or three")
+    description = tui.text(
+        "your project, in a sentence or three",
+        placeholder="e.g. a review of the PV industry; every figure must trace "
+                    "to a source")
 
     drafted = False
     if description.strip():
         try:
-            draft = _distil_with_auditor(description, auditor_vendor, provider,
-                                         model or default_model, base_url)
-            _say(f"\n  Understood: {draft.project_summary}")
-            _say(f"  Domain: {draft.domain}")
-            _say("\n  Drafted rules:\n")
+            draft = _distil(description, provider, model or default_model, base_url)
+            rows = [draft.project_summary, tui.dim(f"domain: {draft.domain}"), ""]
             for r in draft.rules:
-                _say(f"    {r.id}  [{r.severity}]  {r.title}")
-                _say(f"          {r.criterion}")
+                mark = (tui.red("BLOCKER") if r.severity == "BLOCKER"
+                        else tui.dim("advisory"))
+                rows.append(f"{tui.bold(r.id)}  [{mark}]  {r.title}")
+                rows.append(f"    {r.criterion}")
                 if r.from_user:
-                    _say(f"          from you: \u201c{r.from_user}\u201d")
-            if _ask("\n  Commit these as the project's rules? [Y/n]", "Y").lower() \
-                    in ("", "y", "yes"):
+                    rows.append(tui.dim(f'    from you: "{r.from_user}"'))
+            tui.panel("Drafted rules", rows)
+            if tui.confirm("Commit these as the project's rules?", default=True):
                 const_path.write_text(draft.render(target.name))
                 drafted = True
-                _say("  Rules written. Change them any time by saying so:")
-                _say('    crossaudit amend "from now on ..."')
+                tui.ok(f"{const_name} written — change it any time by saying so: "
+                       f'crossaudit amend "from now on ..."')
         except Denial as exc:
-            _say(f"\n  Could not draft rules ({exc.reason}).")
-            _say("  Falling back to the starter template; edit it or use "
-                 "`crossaudit amend` later.")
+            tui.warn(f"could not draft rules: {exc.reason}")
+            tui.note("Falling back to the starter template; edit it, or use "
+                     "`crossaudit amend` once a key is in place.")
     if not drafted and not const_path.exists():
-        const_path.write_text(read("AUDIT_RULES.md"))
+        const_path.write_text(read(const_name))
+        tui.ok(f"{const_name} written from the starter template")
 
-    science_repo = _ask("\nScience repository name (owner/name or a label)",
-                        Path.cwd().name)
-    audit_repo = _ask("Audit repository name (blank for a local ledger)",
-                      "" if mode == "local" else f"{science_repo}-audit")
+    # ---- configuration and shape -------------------------------------------
+    science_repo = tui.text("Project name (owner/name, or a label)", target.name)
+    audit_repo = "" if mode == "local" else f"{science_repo}-audit"
 
-    permissive_min = "false" if mode == "local" else "true"
-    cfg_text = CONFIG_TEMPLATE.format(
+    cfg_path.write_text(CONFIG_TEMPLATE.format(
         science_repo=science_repo,
-        audit_repo_line=f"audit_repo: {audit_repo}" if audit_repo else "# audit_repo: (local ledger)",
+        audit_repo_line=(f"audit_repo: {audit_repo}" if audit_repo
+                         else "# audit_repo: (local ledger)"),
         constitution=const_name,
         max_rounds=3,
         auditor_vendor=auditor_vendor,
@@ -231,46 +237,36 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
         auditor_model=model or default_model,
         base_url_line=f"  base_url: {base_url}\n" if base_url else "",
         generator_vendor=generator_vendor,
-        permissive_minimum=permissive_min,
+        permissive_minimum="false" if mode == "local" else "true",
         state_dir=".crossaudit",
-    )
-    cfg_path.write_text(cfg_text)
-
-    # The repository takes its shape now, not after reading documentation:
-    # an experiments/ layout with a fill-in template, and the ledger directory
-    # explained. Existing files are never overwritten.
-    shaped = write_tree(target, SCIENCE_TREE)
-
-    _say("\n" + "=" * 60)
-    _say(f"wrote {cfg_path}")
-    _say(f"wrote {const_path}")
-    for rel in shaped:
-        _say(f"wrote {rel}")
-    if written:
-        _say(f"wrote {written} (chmod 600)")
-        _say(f"\n  Load the keys into this shell:  source {written}")
+    ))
+    tui.ok(f"{CONFIG_NAME} written")
+    write_tree(target, SCIENCE_TREE)
     if mode == "local":
-        _say("\nMode: local. Both keys are reachable by one process, so receipts")
-        _say("record permissive isolation as false and say so. This tier verifies")
-        _say("and reports; it does not claim enforced admission.")
-    else:
-        _say("\nGitHub pairing plan (0.1 prints it; 0.3 runs it after --apply):")
-        for step in github_plan(science_repo, audit_repo or f"{science_repo}-audit"):
-            _say(f"  {step}")
-        if not shutil.which("gh"):
-            _say("\n  gh is not installed. The wizard requires an authenticated gh;")
-            _say("  install it from https://cli.github.com and run: gh auth login")
+        write_tree(target, AUDIT_TREE)
 
-    _say("\nNext:  crossaudit doctor        # preflight, offline, read-only")
-    _say("       crossaudit check <dir>    # run the deterministic layer")
+    # ---- what to do next ---------------------------------------------------
+    tui.banner("Ready", str(target))
+    rows = []
+    if written:
+        rows.append(f"source {written}")
+        rows.append(tui.dim("    load the keys into this shell"))
+    rows += [
+        "crossaudit doctor",
+        tui.dim("    check everything, offline and read-only"),
+        'crossaudit build "…"',
+        tui.dim("    say what to build; the loop writes and audits it"),
+        "crossaudit console",
+        tui.dim("    two windows in a browser, live, and it outlives the window"),
+    ]
+    tui.panel("Next", rows)
+
+    if mode != "local":
+        tui.panel("Two repositories (privilege separation)",
+                  github_plan(science_repo, audit_repo or f"{science_repo}-audit"))
+        gh_ok, detail = gh_available()
+        if not gh_ok:
+            tui.warn(f"{detail} — install from https://cli.github.com first")
+
     return {"config": str(cfg_path), "constitution": str(const_path),
             "keys_file": str(written) if written else None, "mode": mode}
-
-
-def gh_available() -> tuple[bool, str]:
-    if not shutil.which("gh"):
-        return False, "gh CLI not installed"
-    proc = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
-    if proc.returncode != 0:
-        return False, "gh installed but not authenticated (run: gh auth login)"
-    return True, "gh authenticated"

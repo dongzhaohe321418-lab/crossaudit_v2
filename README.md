@@ -30,9 +30,14 @@ lives behind `init`.
 ## 三分钟上手 Three minutes
 
 ```bash
-mkdir my-project && cd my-project && git init
-crossaudit init
+crossaudit init my-project
 ```
+
+建目录、`git init`、忽略本地状态目录,它一并做掉——**审计读的是 commit,所以
+不是仓库的项目根本没法审**。已在别处建好了就直接 `crossaudit init`。
+
+界面是方向键选择的终端向导(零依赖,stdlib 画的);**管道输入、CI、Windows 无
+termios 时自动退回默认值,绝不卡在一个永远不会到来的按键上**。
 
 向导问四件事:谁审计、谁生成(两家必须不同,否则拒绝)、两个 API key、
 **以及你的项目是什么、你最怕出什么错**。最后一问是关键:你说人话,系统把它

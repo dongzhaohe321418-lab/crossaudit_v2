@@ -350,6 +350,24 @@ not a running process (liveness is proven by the port answering), and a build cu
 off mid-round is reported as interrupted rather than left to read as finished.
 The run file carries a session token, so it is 0600 and lives outside the ledger.
 
+## 6.6 首次配置 · The setup screen
+
+**中文** — `crossaudit init [名字]` 把 `mkdir`、`git init`、忽略本地状态目录
+一并做掉:审计读的是 commit,不是仓库的项目根本无从审起,与其之后报一句关于
+git 的错,不如当场建好。
+
+界面是方向键向导,**零依赖**——termios 加几个 ANSI 转义就够,一个"配置画面更
+好看"不值得动用只有一个包的依赖预算。铁规矩:**每个交互原语都有非交互答案**。
+管道 stdin、CI、没有 termios 的 Windows,一律退回默认值或朴素提示,**绝不卡在
+一个永远不会到来的按键上**;`NO_COLOR` 与非 TTY 时不吐转义码——把日志弄难读来
+迁就一台看不见颜色的机器是本末倒置。
+
+**EN** — `init` does the mkdir and the `git init` too, because an audit reads
+commits and a project that is not a repository cannot be audited at all. The
+wizard is arrow-key driven and dependency-free; every interactive primitive has
+a non-interactive answer, so a piped stdin or a CI job takes defaults rather
+than blocking on a keypress that will never arrive.
+
 ## 7. 分层 · Layering
 
 ```

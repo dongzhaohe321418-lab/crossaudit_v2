@@ -70,7 +70,7 @@ lives behind `init`.
 验证:
 
 ```bash
-crossaudit --version     # crossaudit 2.6.0 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.0 (receipt schema 2)
 ```
 
 <details>
@@ -153,6 +153,8 @@ crossaudit doctor
 ```
 
 `doctor` 逐项体检,最后告诉你**真实的准入档位**——不是你希望的,是实测的。
+
+向导结束后会**自动启动控制台并打开浏览器**——配置结束的地方正是工作开始的地方。无头机器或加 `--no-console` 时改为打印 URL,配置照样算成功:没有浏览器不等于装失败。
 
 ---
 
@@ -403,7 +405,7 @@ pip uninstall crossaudit
 
 ## 状态 · Status
 
-`2.6.0`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
+`2.7.0`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
 争议、领域中立检查包、检查包插件、双仓向导、准入档位自证、实时推送的浏览器面板、
 后台常驻与重连。未落地:enforced 档的实地证据、PyPI 发行。
 

@@ -556,8 +556,46 @@ def cmd_watch(args: argparse.Namespace) -> int:
 def cmd_init(args: argparse.Namespace) -> int:
     summary = wizard.run(Path(args.path or "."), mode="github" if args.github else "local",
                          force=args.force)
+
+    # Finish by opening the console, because the setup ends exactly where the
+    # work begins and asking someone to find the next command themselves is a
+    # gap for no reason. It is a convenience, not a requirement: a headless
+    # machine, a missing browser or --no-console all end with the URL printed
+    # instead, and setup is never reported as failed because a browser was not
+    # available.
+    if not args.no_console:
+        summary.update(_open_console(Path(summary["config"]).parent))
     _emit(summary, args.json)
     return EXIT_OK
+
+
+def _open_console(root: Path) -> dict:
+    """Start the console for a freshly created project and show it."""
+    import subprocess
+    import webbrowser
+
+    from ..console import daemon
+
+    try:
+        cfg = load(root / CONFIG_NAME)
+        info = daemon.live(cfg) or daemon.spawn(cfg, 0)
+    except (Denial, TimeoutError, OSError) as exc:
+        print(f"\n  The console did not start ({exc}). Start it yourself with:")
+        print("    crossaudit console")
+        return {"console": None}
+
+    url = daemon.url_for(info)
+    print(f"\n  Console: {url}")
+    opened = False
+    try:
+        # webbrowser can hand a URL to a text browser or block on a headless
+        # box, so it gets its own guard rather than the benefit of the doubt.
+        opened = webbrowser.open(url)
+    except Exception:                                        # noqa: BLE001
+        opened = False
+    print("  Opened in your browser." if opened
+          else "  Open that URL when you are ready.")
+    return {"console": url, "console_opened": opened}
 
 
 # -------------------------------------------------------------------- run
@@ -804,6 +842,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "(default: here)")
     i.add_argument("--github", action="store_true", help="also plan the repository pair")
     i.add_argument("--force", action="store_true", help="overwrite an existing config")
+    i.add_argument("--no-console", action="store_true",
+                   help="do not start or open the console when setup finishes")
     i.set_defaults(func=cmd_init)
 
     r = sub.add_parser("run", help="audit your latest commit; everything else is automatic")

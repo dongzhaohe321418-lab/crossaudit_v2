@@ -246,3 +246,76 @@ def test_the_readme_is_english_and_the_translation_is_linked():
 def test_the_translation_points_back_at_the_english_one():
     root = Path(__file__).resolve().parents[1]
     assert "README.md" in (root / "README.zh-CN.md").read_text()
+
+
+# --------------------------------------------- setup ends at the console
+def test_setup_opens_the_console_when_it_finishes(tmp_path, monkeypatch):
+    """Setup ends exactly where the work begins; making someone find the next
+    command themselves is a gap for no reason."""
+    import argparse
+
+    import crossaudit.cli.main as main_mod
+
+    opened = {}
+    monkeypatch.setattr(main_mod, "_open_console",
+                        lambda root: opened.setdefault("root", root) and {} or
+                        {"console": "http://127.0.0.1:1/?t=x"})
+    monkeypatch.setattr(main_mod.wizard, "run",
+                        lambda *a, **k: {"config": str(tmp_path / "crossaudit.yml")})
+    args = argparse.Namespace(path=str(tmp_path), github=False, force=False,
+                              no_console=False, json=False)
+    assert main_mod.cmd_init(args) == 0
+    assert opened["root"] == tmp_path
+
+
+def test_no_console_leaves_the_browser_alone(tmp_path, monkeypatch):
+    import argparse
+
+    import crossaudit.cli.main as main_mod
+
+    called = []
+    monkeypatch.setattr(main_mod, "_open_console", lambda root: called.append(root))
+    monkeypatch.setattr(main_mod.wizard, "run",
+                        lambda *a, **k: {"config": str(tmp_path / "crossaudit.yml")})
+    args = argparse.Namespace(path=str(tmp_path), github=False, force=False,
+                              no_console=True, json=False)
+    main_mod.cmd_init(args)
+    assert called == []
+
+
+def test_a_missing_browser_never_fails_the_setup(tmp_path, monkeypatch, capsys):
+    """A headless box has no browser, and that is not a setup failure — the URL
+    is printed and the run still succeeds."""
+    import subprocess
+
+    import crossaudit.cli.main as main_mod
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    (root / "AUDIT_RULES.md").write_text("### CA-X-001\n**BLOCKER.** x\n\ny\n")
+    (root / "crossaudit.yml").write_text(
+        "version: 1\nscience_repo: t/p\nconstitution: AUDIT_RULES.md\n"
+        "auditor: {vendor: openai, provider: openai_compat, model: m,"
+        " key_env: CROSSAUDIT_AUDITOR_KEY}\ngenerator: {vendor: anthropic}\n"
+        "ledger: {dir: cycles}\nstate: {dir: .crossaudit}\nchecks: [parseable]\n")
+
+    from crossaudit.console import daemon
+
+    monkeypatch.setattr(daemon, "live", lambda cfg: {"pid": 1, "port": 9,
+                                                     "token": "t"})
+    monkeypatch.setattr("webbrowser.open", lambda url: (_ for _ in ()).throw(
+        RuntimeError("no browser here")))
+    out = main_mod._open_console(root)
+    assert out["console"].startswith("http://127.0.0.1:9/")
+    assert out["console_opened"] is False
+    assert "Open that URL" in capsys.readouterr().out
+
+
+def test_a_console_that_will_not_start_is_reported_not_raised(tmp_path, capsys):
+    """A project that cannot host a console is still a set-up project."""
+    import crossaudit.cli.main as main_mod
+
+    out = main_mod._open_console(tmp_path)      # no config here at all
+    assert out == {"console": None}
+    assert "crossaudit console" in capsys.readouterr().out

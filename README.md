@@ -67,7 +67,7 @@ behind `init`.
 Check it:
 
 ```bash
-crossaudit --version     # crossaudit 2.6.0 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.0 (receipt schema 2)
 ```
 
 <details>
@@ -156,6 +156,11 @@ crossaudit doctor
 
 `doctor` checks everything and ends by telling you the **admission tier you are
 actually at** — measured, not hoped for.
+
+Setup finishes by starting the console and opening it, because that is where the
+work begins. On a headless machine, or with `--no-console`, it prints the URL
+instead and the setup still succeeds — a missing browser is not a failed
+install.
 
 ---
 
@@ -429,7 +434,7 @@ Three principles run through all of it:
 
 ## Status
 
-`2.6.0`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
+`2.7.0`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
 closed `build` loop, the one-shot dispute channel, domain-neutral checks,
 allowlisted check-pack plugins, the paired-repository wizard, evidence-based
 admission tiering, a live-pushed browser dashboard, and a console that outlives

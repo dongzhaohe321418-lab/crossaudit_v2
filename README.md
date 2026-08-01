@@ -103,8 +103,19 @@ generator may write; and their hashes go into the receipt.
 ## 浏览器里的黑箱 The box, in a browser
 
 ```bash
-crossaudit console
+crossaudit console            # 后台常驻,关窗口不影响它
+crossaudit console --status   # 在跑吗?URL 是什么
+crossaudit console --stop     # 停掉
 ```
+
+**关掉窗口 build 照跑**,再执行 `crossaudit console` 会**重连**回同一个 URL,
+接着看。守护进程被强杀(断电、误关)后重开,会如实告诉你"上次有一个 build 被
+打断"——账本里已提交的轮次一条不少,被切断的那一轮不在里面。
+
+The console outlives the window: builds keep running, `crossaudit console`
+reattaches to the same URL, and if the daemon was killed mid-build the next one
+says the build was interrupted rather than letting a half-finished loop read as
+finished.
 
 **执行端主窗 · 审计端副窗 · 底部一个输入框**。你像对任何 AI 一样打字,程序决定
 这句话该给谁——"把主题改成储能成本"去左窗(执行端整轮开工),"以后审计重点放在

@@ -164,3 +164,23 @@ def test_the_page_never_reaches_outside_itself():
 
     for forbidden in ("http://", "https://", "<script src", "<link "):
         assert forbidden not in PAGE, f"page references {forbidden!r}"
+
+
+def test_the_page_source_is_raw_so_javascript_escapes_survive():
+    """PAGE holds JavaScript, and JavaScript is full of backslashes. A plain
+    Python string eats them: \\s becomes an invalid escape, \\n becomes a real
+    newline, and the script breaks in ways whose only symptom is the form
+    silently falling back to a native submit."""
+    import inspect
+
+    from crossaudit.console import page as page_mod
+
+    src = inspect.getsource(page_mod)
+    assert 'PAGE = r"""' in src, "PAGE must be a raw string"
+
+
+def test_the_page_javascript_still_contains_its_regexes():
+    from crossaudit.console.page import PAGE
+
+    assert r"/\s+/g" in PAGE          # would be mangled by a non-raw string
+    assert r"[&<>\"]" in PAGE or '[&<>"]' in PAGE

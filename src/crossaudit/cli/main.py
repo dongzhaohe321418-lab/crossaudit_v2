@@ -448,22 +448,69 @@ def cmd_skills(args: argparse.Namespace) -> int:
 
 
 def cmd_console(args: argparse.Namespace) -> int:
-    """Open the read-only window. Loopback, tokenised, and it writes nothing."""
-    from ..console import serve
+    """The console, optionally outliving the terminal that started it.
+
+    Default behaviour is to keep running after the window closes and to reattach
+    on the next invocation: closing a tab was never meant to end a build, and
+    neither should closing a shell.
+    """
+    import signal
+
+    from ..console import daemon, serve
 
     cfg = load()
-    url, httpd = serve(cfg, port=args.port)
-    # Flushed explicitly: stdout is block-buffered when it is not a terminal, and
-    # a URL the user cannot see until the process exits is a URL they do not have.
-    print(f"\n  CrossAudit console — read-only\n  {url}\n\n"
-          "  Loopback only, and the token above is required on every request, so a\n"
-          "  page you visit elsewhere cannot reach it. Nothing here can change\n"
-          "  anything: actions live in the CLI. Closes when idle; Ctrl-C to stop.",
-          flush=True)
+
+    if args.stop:
+        print(daemon.stop(cfg))
+        return EXIT_OK
+
+    running = daemon.live(cfg)
+    if args.status:
+        if running:
+            print(f"  console running (pid {running['pid']}) — {daemon.url_for(running)}")
+        else:
+            print("  no console running here")
+        return EXIT_OK
+
+    if running and not args.foreground:
+        # Reattach rather than start a rival: two consoles would race on the
+        # working tree and on the round budget.
+        print(f"\n  A console is already running for this project (pid "
+              f"{running['pid']}).\n  {daemon.url_for(running)}\n\n"
+              f"  Stop it with `crossaudit console --stop`.", flush=True)
+        return EXIT_OK
+
+    if not args.foreground:
+        try:
+            info = daemon.spawn(cfg, args.port)
+        except TimeoutError as exc:
+            raise ConfigDenial(str(exc)) from exc
+        print(f"\n  CrossAudit console — running in the background (pid "
+              f"{info['pid']})\n  {daemon.url_for(info)}\n\n"
+              "  It keeps running when you close this window, and a build keeps\n"
+              "  going with it. Come back with `crossaudit console` for the URL,\n"
+              "  or end it with `crossaudit console --stop`.", flush=True)
+        return EXIT_OK
+
+    # Foreground: this is the process the daemon actually runs.
+    url, httpd = serve(cfg, port=args.port, register=True,
+                       idle_timeout=float("inf") if os.environ.get(
+                           "CROSSAUDIT_CONSOLE_CHILD") else 900.0)
+    print(f"\n  CrossAudit console — read/write over loopback\n  {url}\n\n"
+          "  Loopback only, and the token above is required on every request.\n"
+          "  Ctrl-C to stop.", flush=True)
+
+    def bye(*_a) -> None:
+        daemon.clear_run(cfg)
+        httpd.shutdown()
+
+    signal.signal(signal.SIGTERM, bye)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n  closed")
+    finally:
+        daemon.clear_run(cfg)
     return EXIT_OK
 
 
@@ -811,6 +858,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     co = sub.add_parser("console", help="read-only ledger in a browser (loopback)")
     co.add_argument("--port", type=int, default=0, help="0 picks a free port")
+    co.add_argument("--foreground", action="store_true",
+                    help="run here and stop when this window closes")
+    co.add_argument("--stop", action="store_true", help="stop the running console")
+    co.add_argument("--status", action="store_true", help="is one running?")
     co.set_defaults(func=cmd_console)
 
     pr = sub.add_parser("pair", help="create the two repositories (plan, then --apply)")

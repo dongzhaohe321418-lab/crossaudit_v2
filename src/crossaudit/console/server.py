@@ -34,6 +34,7 @@ from ..config import Config
 from ..controller import StateStore
 from ..errors import Denial
 from ..router import history as routing_history
+from . import daemon
 from .page import PAGE
 from .progress import TRACKER
 from .streams import both
@@ -76,6 +77,9 @@ def snapshot(cfg: Config) -> dict:
         # In-flight work, if any. Ephemeral by construction: the ledger is still
         # the record, and this vanishes with the process.
         "progress": TRACKER.snapshot(),
+        # A build that was in flight when a previous process ended. The ledger
+        # holds the rounds that were committed; only this can say one was cut off.
+        "interrupted": daemon.interrupted(cfg),
     }
 
 
@@ -93,6 +97,7 @@ def start_build(cfg: Config, task: str) -> dict:
     preflight(cfg)
     resolved = resolve_task(cfg, task.split())
     run = TRACKER.start(resolved)
+    daemon.mark_build(cfg, resolved)
 
     def work() -> None:
         try:
@@ -103,6 +108,8 @@ def start_build(cfg: Config, task: str) -> dict:
             TRACKER.finish("refused", exc.reason)
         except Exception as exc:                                  # noqa: BLE001
             TRACKER.finish("failed", f"{type(exc).__name__}: {exc}")
+        finally:
+            daemon.unmark_build(cfg)
 
     threading.Thread(target=work, daemon=True).start()
     return {"started": True, "task": resolved.splitlines()[0][:80]}
@@ -236,7 +243,9 @@ def make_handler(cfg: Config, token: str, touch) -> type:
     return Handler
 
 
-def serve(cfg: Config, port: int = 0) -> tuple[str, ThreadingHTTPServer]:
+def serve(cfg: Config, port: int = 0, *,
+          idle_timeout: float = IDLE_TIMEOUT_S,
+          register: bool = False) -> tuple[str, ThreadingHTTPServer]:
     """Start the console. Returns (url carrying the session token, server)."""
     token = secrets.token_urlsafe(24)
     last = [time.monotonic()]
@@ -249,9 +258,18 @@ def serve(cfg: Config, port: int = 0) -> tuple[str, ThreadingHTTPServer]:
     def idle_watch() -> None:
         while True:
             time.sleep(5)
-            if time.monotonic() - last[0] > IDLE_TIMEOUT_S:
+            # A closed window must never end a running build: idleness is only
+            # grounds for shutting down when there is nothing in flight.
+            if TRACKER.running:
+                last[0] = time.monotonic()
+                continue
+            if time.monotonic() - last[0] > idle_timeout:
                 httpd.shutdown()
                 return
 
     threading.Thread(target=idle_watch, daemon=True).start()
-    return f"http://127.0.0.1:{httpd.server_address[1]}/?t={token}", httpd
+    port_in_use = httpd.server_address[1]
+    if register:
+        # So a later invocation can find this console rather than start a rival.
+        daemon.write_run(cfg, pid=os.getpid(), port=port_in_use, token=token)
+    return f"http://127.0.0.1:{port_in_use}/?t={token}", httpd

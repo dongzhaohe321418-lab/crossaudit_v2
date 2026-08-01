@@ -321,6 +321,35 @@ the process, and nothing downstream reads them. One build at a time per project,
 and the CLI and the console drive the *same* loop function rather than two
 copies that could drift on the only thing that matters — when to stop.
 
+## 6.5 常驻与重连 · Outliving the window
+
+**中文** — 关浏览器标签从来不会中断 build(它跑在控制台进程的线程里);会中断
+它的是关掉终端。所以 `crossaudit console` 默认**脱离终端常驻**,再次执行则
+**重连而非另起**——两个控制台会在工作区和轮次预算上打架。
+
+| 动作 | 行为 |
+|---|---|
+| `crossaudit console` | 有在跑的就交回它的 URL;没有就后台起一个 |
+| `crossaudit console --status` | 有没有在跑,pid 与 URL |
+| `crossaudit console --stop` | 停掉 |
+| `crossaudit console --foreground` | 就在这个窗口跑,窗口关就结束 |
+
+三个诚实点:**在跑的 build 期间永不因空闲自关**(关窗不该结束一份工作);
+**陈旧的记录文件不等于在跑的进程**——存活由端口应答证明,不由文件存在证明;
+**被打断的 build 必须说出来**:内存里的进度随进程消失,账本握有每一个已提交的
+轮次,但账本无从知道某一轮被切断了——所以开工时落一个标记、结束时清掉,重开的
+控制台据此如实说"上次被打断",而不是让一个半截的循环读起来像完成的。
+
+记录文件带 session token,因此 0600、且放在 gitignore 的状态目录里——进了账本
+的凭证就是公开的凭证。
+
+**EN** — Closing a tab never ended a build; closing the terminal did. The console
+now detaches by default and a second invocation reattaches rather than racing.
+Three honesty points: it never idles out while a build runs, a stale run file is
+not a running process (liveness is proven by the port answering), and a build cut
+off mid-round is reported as interrupted rather than left to read as finished.
+The run file carries a session token, so it is 0600 and lives outside the ledger.
+
 ## 7. 分层 · Layering
 
 ```

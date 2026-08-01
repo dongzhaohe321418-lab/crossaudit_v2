@@ -17,7 +17,7 @@ could already do, which is the console rule from the paper's roadmap.
 """
 from __future__ import annotations
 
-PAGE = """<!doctype html>
+PAGE = r"""<!doctype html>
 <meta charset="utf-8"><title>CrossAudit</title>
 <style>
 :root{color-scheme:light dark;--fg:#14171a;--dim:#6b7378;--faint:#9aa3a8;
@@ -100,6 +100,9 @@ animation:pulse 1.1s ease-in-out infinite}
 .step .d{color:var(--faint);margin-left:6px}
 .step.round{border-top:1px solid var(--line);margin-top:4px;padding-top:5px;
 color:var(--dim)}
+.warn-bar{padding:8px 18px;border-top:1px solid var(--line);font-size:12px;
+color:var(--amber);display:none}
+.warn-bar.on{display:block}
 </style>
 
 <header>
@@ -129,6 +132,7 @@ color:var(--dim)}
     <span class="elapsed" id="live-elapsed"></span></div>
   <div class="steps" id="steps"></div>
 </div>
+<div class="warn-bar" id="interrupted"></div>
 <div class="state" id="state"></div>
 <div class="route" id="route"></div>
 <form id="f" autocomplete="off">
@@ -209,6 +213,14 @@ async function draw(){
          ? '<span class="chip" style="margin-left:auto"><span class="k">toward enforced: '
            + esc(d.tier.shortfalls[0]) + '</span></span>' : '');
 
+    const iv = document.getElementById('interrupted');
+    if(d.interrupted && !(d.progress && !d.progress.finished)){
+      iv.className = 'warn-bar on';
+      iv.textContent = 'A build was interrupted: "'
+        + d.interrupted.task.replace(/\s+/g, ' ').slice(0,60)
+        + '". The rounds it committed are in the ledger below; the round it was '
+        + 'in the middle of is not. Say it again to carry on.';
+    }else{ iv.className = 'warn-bar'; }
     drawProgress(d.progress);
     for(const el of document.querySelectorAll('.scroll')) el.scrollTop = el.scrollHeight;
   }catch(e){

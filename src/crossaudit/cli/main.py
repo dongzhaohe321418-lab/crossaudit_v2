@@ -858,7 +858,7 @@ def build_parser() -> argparse.ArgumentParser:
     sk.add_argument("--new", metavar="NAME", help="write a starter skill")
     sk.set_defaults(func=cmd_skills)
 
-    co = sub.add_parser("console", help="read-only ledger in a browser (loopback)")
+    co = sub.add_parser("console", help="the dashboard in a browser; runs in the background")
     co.add_argument("--port", type=int, default=0, help="0 picks a free port")
     co.add_argument("--foreground", action="store_true",
                     help="run here and stop when this window closes")

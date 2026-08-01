@@ -118,3 +118,50 @@ def test_preparing_twice_does_not_duplicate_the_ignore_rule(tmp_path: Path):
     wizard.prepare(target)
     wizard.prepare(target)
     assert (target / ".gitignore").read_text().count(".crossaudit/") == 1
+
+
+# ------------------------------------------------------- the README is a contract
+def test_every_command_the_readme_shows_actually_exists():
+    """A README with a wrong command is worse than no README: the reader trusts
+    it, and the tool has already spent their patience by the time it fails."""
+    import re
+
+    from crossaudit.cli.main import build_parser
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    parser = build_parser()
+    real = set(next(a.choices for a in parser._actions if a.choices))
+    used = set(re.findall(r"crossaudit ([a-z][a-z-]+)", readme))
+    assert not (used - real), f"README shows commands that do not exist: {used - real}"
+
+
+def test_the_readme_documents_every_user_facing_environment_variable():
+    import re
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    found: set[str] = set()
+    for py in src.rglob("*.py"):
+        found |= set(re.findall(r"CROSSAUDIT_[A-Z_]+", py.read_text()))
+    # Internal plumbing a user never sets by hand.
+    internal = {"CROSSAUDIT_CONSOLE_CHILD", "CROSSAUDIT_LOCKFILE",
+                "CROSSAUDIT_REPLAY_DIR"}
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    documented = set(re.findall(r"CROSSAUDIT_[A-Z_]+", readme))
+    assert not ((found - internal) - documented), \
+        f"undocumented: {sorted((found - internal) - documented)}"
+
+
+def test_the_readme_states_the_version_the_package_reports():
+    from crossaudit import __version__
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    assert __version__ in readme, f"README does not mention {__version__}"
+
+
+def test_the_readme_exit_codes_match_the_contract():
+    from crossaudit import errors
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    for code in (errors.EXIT_OK, errors.EXIT_BLOCKED, errors.EXIT_ESCALATED,
+                 errors.EXIT_CONFIG, errors.EXIT_INTEGRITY, errors.EXIT_PROVIDER):
+        assert f"`{code}`" in readme, f"exit code {code} is not in the README table"

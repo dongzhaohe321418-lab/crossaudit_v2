@@ -72,7 +72,7 @@ revises until it passes or hands it to you.**
 crossaudit talk "以后严查每个数字的来源"      # → 改标准,起草修宪,确认后提交
 crossaudit talk "第三节太啰嗦了,压缩一下"     # → 改内容,交给执行端
 crossaudit talk "现在怎么样了"                # → 只读查询,从账本回答
-crossaudit talk "那次拦错了"                  # → 争议,按规则 ID 一次性申辩
+crossaudit talk "那次拦错了,0.052 是引用原文"   # → 争议:回审计端重读一次,它自裁
 ```
 
 程序自己判断这句话属于哪条车道。**拿不准就问,绝不猜。**
@@ -103,6 +103,7 @@ crossaudit run       # 审计最新提交:确定性检查 → 模型审计 → �
 crossaudit check     # 只跑确定性检查层,不碰任何模型
 crossaudit amend "…" # 直接修宪(等于 talk 的 amendment 车道)
 crossaudit resolve <cycle> --reopen --because "…"   # 人类裁决升级
+crossaudit pair --apply                              # 建双仓:权限分离
 crossaudit doctor --fix                              # 体检并逐条指路
 ```
 
@@ -141,14 +142,17 @@ paired-repository tier exists for privilege separation between the two agents.
 
 ## 状态 Status
 
-`2.0.0a2`. 已落地:对话式宪法蒸馏、路由器(六车道 + 低置信度反问 + 决定入账)、
-`talk`/`amend`/`routing`、**`build` 闭环(执行端自动写、提交、按 findings 重写)**,
-以及 v1 的完整引擎(确定性层、回执 v2 自指认、单次准入、升级裁决)。
-未落地:争议车道、领域检查包插件、双仓向导自动化。路线图见 [DESIGN.md §8](DESIGN.md)。
+`2.0.0a4`. 已落地:对话式宪法蒸馏、路由器(六车道全通)、`build` 闭环、
+**争议车道**(一次性、审计端自裁)、**领域中立检查包**(4 项,非科研可用)、
+**检查包插件**(allowlist + API 版本校验)、**`pair` 双仓向导**(先 plan 后
+`--apply`),以及 v1 的完整引擎。未落地:enforced 准入档(需独立持久 controller
++ GitHub App)、浏览器控制台。路线图见 [DESIGN.md §8](DESIGN.md)。
 
-Landed: spoken-rule distillation, the router, `talk`/`amend`/`routing`, the
-closed `build` loop, and v1's full engine. Not yet: the dispute channel, domain
-check packs, paired-repo automation.
+Landed: everything through a4 — spoken rules, the six-lane router, the closed
+build loop, the one-shot dispute channel, domain-neutral checks, allowlisted
+check-pack plugins, and the paired-repository wizard. Not yet: the enforced
+admission tier (needs an independent persistent controller and a GitHub App),
+and the browser console.
 
 ## 许可 License
 

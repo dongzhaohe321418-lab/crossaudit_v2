@@ -59,10 +59,13 @@ def available() -> list[str]:
 
 
 def run_checks(files: Mapping[str, bytes], names: list[str],
-               notes: list[str] | None = None) -> CheckResult:
+               notes: list[str] | None = None,
+               plugins: list[str] | None = None) -> CheckResult:
     """Run the named checks. An unknown name denies rather than being skipped."""
-    from . import builtin  # noqa: F401  (registers the builtins on import)
+    from . import builtin, neutral  # noqa: F401  (registration on import)
+    from .plugins import load_allowed
 
+    load_allowed(plugins)
     missing = [n for n in names if n not in _REGISTRY]
     if missing:
         raise ConfigDenial(f"unknown checks {missing}; available: {available()}")

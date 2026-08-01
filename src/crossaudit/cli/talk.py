@@ -142,12 +142,60 @@ def lane_generator(cfg: Config, routing) -> str:
     return f"built and audited (exit {code})"
 
 
-def lane_dispute(cfg: Config, routing) -> str:
-    print(f"\n  Recorded as a dispute: {routing.restated}")
-    print("  A dispute returns one finding to the auditor once, with grounds.")
-    print("  The dispute channel lands in a2; the routing decision is already "
-          "in the ledger.")
-    return "dispute recorded (channel pending)"
+def _latest_report(cfg: Config) -> tuple[str, str]:
+    """(report text, cycle directory name) of the most recent audit."""
+    ledger = cfg.root / cfg.ledger_dir
+    reports = sorted(ledger.glob("*/report.md"), key=lambda p: p.stat().st_mtime)
+    if not reports:
+        raise ConfigDenial("nothing has been audited yet, so nothing can be disputed")
+    return reports[-1].read_text(), reports[-1].parent.name
+
+
+def lane_dispute(cfg: Config, routing, *, hint: str = "") -> str:
+    """One contested finding, one trip back to the auditor, with grounds.
+
+    The auditor rules on its own finding; the dispute buys a second reading, not
+    a veto. A withdrawal is recorded, not applied retroactively: the report that
+    was committed stays committed, and the ledger carries the correction beside
+    it.
+    """
+    from .. import dispute as dis
+
+    report, cycle_dir = _latest_report(cfg)
+    findings = dis.parse_findings(report)
+    finding = dis.select(findings, hint)
+    log = cfg.root / cfg.ledger_dir / dis.DISPUTES_LOG
+    if dis.already_disputed(log, cycle_dir, finding.key):
+        print(f"\n  {finding.key} has already had its one reading. If you still "
+              f"disagree, the lane is amendment: the rule, not the finding.")
+        return f"refused: {finding.key} already disputed"
+
+    artefact = cfg.root / finding.artifact
+    artefact_text = artefact.read_text() if artefact.is_file() else "(artefact not found)"
+    constitution = (cfg.root / cfg.constitution).read_text()
+
+    print(f"\n  Disputing {finding.key}")
+    print(f"    the finding: {finding.observation[:160]}")
+    print(f"    your grounds: {routing.restated}")
+    print("  Returning it to the auditor for one re-reading…")
+
+    ruling = dis.adjudicate(finding, routing.restated, artefact_text,
+                            dis.rule_text(constitution, finding.rule),
+                            complete=_auditor_complete(cfg), cycle_id=cycle_dir)
+    dis.record(log, ruling)
+    git("add", "--", str((log).relative_to(cfg.root)), cwd=cfg.root)
+    git("commit", "-q", "-m",
+        f"dispute {finding.key}: {ruling.ruling.lower()}", cwd=cfg.root)
+
+    if ruling.withdrawn:
+        print(f"\n  WITHDRAWN — {ruling.reasoning}")
+        print("  The finding is struck from the record's effect; the report that "
+              "raised it stays, with the withdrawal recorded beside it.")
+    else:
+        print(f"\n  UPHELD — {ruling.reasoning}")
+        print("  The finding stands. Fix the artefact, or if you think the rule "
+              "itself is wrong, say so and it becomes an amendment.")
+    return f"{finding.key} {ruling.ruling.lower()}"
 
 
 def lane_resolve(cfg: Config, routing, *, assume_yes: bool) -> str:

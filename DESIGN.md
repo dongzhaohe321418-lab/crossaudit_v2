@@ -134,7 +134,7 @@ and amendments take effect only between cycles.
 | `project` | "这是一个 X 项目,我怕 Y" | 执行端任务书 + 审计端宪法底稿(各自落盘) |
 | `generator` | "太啰嗦了""补一节关于 Z""这段重写" | 执行端修订指令 → 新增量 commit |
 | `amendment` | "以后严查数据来源""这条太严,放宽" | 宪法修订草案 → 确认 → 下一周期生效 |
-| `dispute` | "那次拦错了""这个 finding 不成立" | 按 rule ID 的一次性争议,带论据,入账 |
+| `dispute` | "那次拦错了""这个 finding 不成立" | 按 rule ID 的**一次性**争议:带论据回到审计端重读一次,审计端自裁 UPHELD/WITHDRAWN,裁决入账。争规则不是争 finding——那是修宪 |
 | `resolve` | "算了,这个就这样吧""放行" | 人类对升级的裁决(I6 的另一半) |
 | `query` | "现在怎么样了""为什么被拦" | 只读,从账本回答,不产生任何变更 |
 
@@ -179,10 +179,14 @@ supervision, the thing the protocol exists to prevent.
 领域相关的只有两处,都是可换件:
 
 1. **确定性检查包**(DCL)——v1 内置的四个检查(schema/units/convergence/
-   provenance)假设了实验数据格式。v2 的默认检查包是**领域中立**的(文件存在、
-   声明完整、内部引用一致、产出可解析),领域检查靠 `crossaudit.checks`
-   entry-point 分发。没有现成检查包的领域,DCL 贡献为零,模型审计独自扛——
-   **loop 照转,但 I4 的机械保障退化,这一点必须对用户说明,不能含糊。**
+   provenance)假设了实验数据格式。v2 的默认检查包是**领域中立**的,四项
+   (a4 已实现):`parseable` 声称是 JSON/YAML 的文件必须真能解析、`declared`
+   声明的输入必须存在于受审范围、`internal` 内部链接必须指向存在的东西、
+   `complete` 不许把 TODO/占位符留进受审工作。领域检查靠 `crossaudit.checks`
+   entry-point 分发,**默认不发现、只加载 allowlist 里点名的包**,并校验
+   `DCL_API_VERSION`——entry point 是任意代码执行,而这个进程马上要持有密钥
+   并写账本。没有现成检查包的领域,DCL 只剩这四项,模型审计承担其余——
+   **loop 照转,但 I4 的机械保障变薄,这一点必须对用户说明,不能含糊。**
 2. **宪法内容**——由第 3 节的对话蒸馏产生,天然就是那个领域的规则。
 
 **适用边界只有一条**:产出必须能落成文件,标准必须能说成规则。
@@ -273,7 +277,7 @@ nothing for the box**: the box cannot do what the CLI could not.
 | **v2.0.0-a1** ✅ | 对话式 `init`(宪法蒸馏)、`amend`(一句话修宪)、路由器骨架 + `routing.jsonl` | 用户从未写过 markdown,宪法已落盘并被回执引用 |
 | **a2** ✅ | `talk`:单一对话面,六条车道,低置信度反问 | 一次会话内完成"改内容 / 改标准 / 查询"三类操作,全部入账 |
 | **a3** ✅ | `build`:执行端 agent 接入,箱内自动写、提交、审、按 findings 重写,直至 PASS 或升级 | 用户只说需求,产出与账本自己长出来 |
-| a4 | 领域中立 DCL + 检查包插件;双仓向导自动化;争议车道接通 | 非科研项目全流程跑通;paired 档位可用 |
+| **a4** ✅ | 争议车道接通(一次性、审计端自裁);领域中立 DCL(4 项);检查包插件(allowlist + API 版本);`pair` 双仓向导(plan → --apply) | 非科研项目全流程跑通;paired 档位可用 |
 | 2.0 | 稳定 schema/API;浏览器只读控制台 | 独立安全复核 + 真实部署证据 |
 
 ---

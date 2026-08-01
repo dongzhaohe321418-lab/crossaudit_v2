@@ -100,7 +100,7 @@ def run_audit(*, cfg: Config, sha: str, round_: int, files: Mapping[str, bytes],
               escalation_lock: bool = False, offline: bool = False,
               allow_custom_endpoint: bool = False, retention: str = "sealed"
               ) -> AuditOutcome:
-    dcl = run_checks(files, cfg.checks, notes).as_dict()
+    dcl = run_checks(files, cfg.checks, notes, cfg.plugins).as_dict()
     prompt, bounded, prompt_sha = prompt_mod.build(constitution, constitution_commit,
                                                    dcl, files)
     reply: dict | None = None

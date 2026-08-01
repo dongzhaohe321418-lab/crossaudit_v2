@@ -213,7 +213,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             if p.is_file():
                 files[str(p.relative_to(root))] = p.read_bytes()
         where = f"{root} (working tree)"
-    result = run_checks(files, cfg.checks, notes).as_dict()
+    result = run_checks(files, cfg.checks, notes, cfg.plugins).as_dict()
     human = [f"deterministic layer over {where}",
              f"verdict: {result['verdict']}  ({result['total_hard_failures']} hard failures)"]
     for f in result["findings"]:
@@ -377,6 +377,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
           + ("run `crossaudit run` to re-audit." if action == "reopen"
              else "the increment stays out of the record."))
     return EXIT_OK
+
+
+def _cmd_pair(args: argparse.Namespace) -> int:
+    from .pair import cmd_pair
+
+    return cmd_pair(args)
 
 
 def _cmd_build(args: argparse.Namespace) -> int:
@@ -709,6 +715,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("watch", help="live view: generator, auditor, and their conversation")
     w.set_defaults(func=cmd_watch)
+
+    pr = sub.add_parser("pair", help="create the two repositories (plan, then --apply)")
+    pr.add_argument("--science", help="owner/name for the work repository")
+    pr.add_argument("--audit", help="owner/name for the audit repository")
+    pr.add_argument("--public", action="store_true")
+    pr.add_argument("--apply", action="store_true", help="actually create them")
+    pr.set_defaults(func=_cmd_pair)
 
     b = sub.add_parser("build", help='say what to build; the loop writes and audits it')
     b.add_argument("words", nargs="*")

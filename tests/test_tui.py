@@ -391,3 +391,84 @@ def test_the_error_says_which_problem_you_have(tmp_path, monkeypatch):
     f.write_text('export CROSSAUDIT_AUDITOR_KEY="sk-a"\n')
     with pytest.raises(ConfigDenial, match="not set in this process"):
         read_key("CROSSAUDIT_AUDITOR_KEY")       # stored, but not loaded here
+
+
+# ------------------------------------------------------------ tls trust
+def test_a_certificate_failure_is_reported_as_a_fixable_setup_problem():
+    """Reported as "provider unreachable" it sends people to look at their
+    network, or at us, for something one command repairs."""
+    import ssl
+    import urllib.error
+
+    from crossaudit.errors import ProviderDenial
+    from crossaudit.providers import base
+
+    reason = ssl.SSLCertVerificationError("unable to get local issuer certificate")
+    with pytest.raises(ProviderDenial) as caught:
+        try:
+            raise urllib.error.URLError(reason)
+        except urllib.error.URLError as exc:
+            base._reraise_transport(exc)          # the branch request_json takes
+    text = str(caught.value)
+    assert "verify TLS certificates" in text
+    assert "certifi" in text and "SSL_CERT_FILE" in text
+    assert sys.executable in text                 # which python, not just "python"
+
+
+def test_an_ordinary_outage_keeps_its_plain_message():
+    import socket
+    import urllib.error
+
+    from crossaudit.errors import ProviderDenial
+    from crossaudit.providers import base
+
+    with pytest.raises(ProviderDenial, match="provider unreachable"):
+        try:
+            raise urllib.error.URLError(socket.gaierror("nodename nor servname"))
+        except urllib.error.URLError as exc:
+            base._reraise_transport(exc)
+
+
+def test_verification_is_never_disabled():
+    """There is no insecure switch, and there must not be one: a receipt naming a
+    vendor nobody authenticated attests to nothing."""
+    import ssl
+
+    from crossaudit.providers import base
+
+    ctx = base.tls_context()
+    assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+    source = Path(base.__file__).read_text()
+    assert "CERT_NONE" not in source and "_create_unverified" not in source
+
+
+def test_an_explicit_bundle_is_honoured(monkeypatch, tmp_path):
+    """The escape hatch for a network that inspects TLS is a *different* root to
+    trust, never a decision to trust anything."""
+    import ssl
+
+    from crossaudit.providers import base
+
+    monkeypatch.setenv("CROSSAUDIT_CA_BUNDLE", str(tmp_path / "nope.pem"))
+    with pytest.raises((FileNotFoundError, ssl.SSLError, OSError)):
+        base.tls_context()
+
+
+def test_the_advice_names_this_machine():
+    from crossaudit.providers import base
+
+    advice = base.tls_advice()
+    assert "trust store" in advice and sys.executable in advice
+    if sys.platform == "darwin":
+        assert "Install Certificates.command" in advice
+
+
+def test_the_advice_names_the_store_actually_in_effect(monkeypatch):
+    """SSL_CERT_FILE overrides the compiled-in path. Printing the compiled one
+    while the override is the broken one reads as "certificates are fine"."""
+    from crossaudit.providers import base
+
+    monkeypatch.setenv("SSL_CERT_FILE", "/nonexistent/cert.pem")
+    advice = base.tls_advice()
+    assert "/nonexistent/cert.pem" in advice
+    assert "$SSL_CERT_FILE" in advice and "← missing" in advice

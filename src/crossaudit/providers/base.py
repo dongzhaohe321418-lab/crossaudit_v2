@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import socket
+import ssl
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -34,6 +36,68 @@ class Reply:
         if retention == "sealed":
             out["raw_retained"] = False   # 0.x keeps commitments only; see roadmap
         return out
+
+
+def tls_context() -> ssl.SSLContext:
+    """A context that verifies, whatever this interpreter came with.
+
+    `ssl.create_default_context()` already honours SSL_CERT_FILE and SSL_CERT_DIR.
+    What it does not do is notice that it ended up with nothing: a python.org
+    install whose `Install Certificates.command` was never run loads zero
+    certificates and then fails every handshake. If that happened and `certifi`
+    is importable we use it — an optional convenience, never a dependency.
+
+    There is deliberately no way to turn verification off. A tool whose output is
+    an attestation of who produced a verdict cannot accept an unverified peer:
+    the receipt would name a vendor nobody checked.
+    """
+    bundle = os.environ.get("CROSSAUDIT_CA_BUNDLE", "").strip()
+    if bundle:
+        return ssl.create_default_context(cafile=bundle)
+    ctx = ssl.create_default_context()
+    if not ctx.get_ca_certs():
+        try:
+            import certifi
+        except ImportError:
+            return ctx                      # tls_advice() explains it when it fails
+        ctx.load_verify_locations(cafile=certifi.where())
+    return ctx
+
+
+def tls_advice() -> str:
+    """What to do about a certificate failure, on this machine specifically."""
+    paths = ssl.get_default_verify_paths()
+    # Report what is actually in effect, not the path compiled into this build:
+    # SSL_CERT_FILE overrides it, and naming a file that exists while the override
+    # is the broken one reads as "certificates are fine, look elsewhere".
+    override = os.environ.get("CROSSAUDIT_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
+    where = override or paths.cafile or paths.openssl_cafile or "(none)"
+    via = ("CROSSAUDIT_CA_BUNDLE" if os.environ.get("CROSSAUDIT_CA_BUNDLE")
+           else "SSL_CERT_FILE" if os.environ.get("SSL_CERT_FILE") else "")
+    tail = "" if (where != "(none)" and os.path.exists(where)) else "   ← missing"
+    lines = [
+        "this Python cannot verify TLS certificates.",
+        f"  interpreter  {sys.executable}",
+        f"  trust store  {where}" + (f"  (from ${via})" if via else "") + tail,
+        "",
+        "Fix any one of these:",
+    ]
+    if sys.platform == "darwin":
+        v = f"{sys.version_info.major}.{sys.version_info.minor}"
+        lines.append(f'  · python.org install: run "/Applications/Python {v}/'
+                     'Install Certificates.command"')
+    lines += [
+        "  · pip install certifi        (crossaudit picks it up automatically)",
+        "  · export SSL_CERT_FILE=/path/to/ca-bundle.pem",
+    ]
+    lines += [
+        "",
+        "If your network inspects TLS (a corporate proxy or VPN), point",
+        "CROSSAUDIT_CA_BUNDLE at your organisation's root certificate.",
+        "Verification is never skipped: a receipt that names a vendor nobody",
+        "authenticated would be attesting to nothing.",
+    ]
+    return "\n".join(lines)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -68,7 +132,8 @@ def request_json(url: str, payload: dict, headers: dict, *, timeout: float = CON
     """POST JSON, refuse redirects, cap the response. Never logs the payload."""
     body = json.dumps(payload).encode()
     req = urllib.request.Request(url, body, {"content-type": "application/json", **headers})
-    opener = urllib.request.build_opener(_NoRedirect)
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=tls_context()), _NoRedirect)
     try:
         with opener.open(req, timeout=timeout) as resp:
             data = resp.read(MAX_RESPONSE_BYTES + 1)
@@ -81,9 +146,22 @@ def request_json(url: str, payload: dict, headers: dict, *, timeout: float = CON
         raise ProviderDenial(f"provider returned HTTP {exc.code}", status=exc.code,
                              detail=detail[:300]) from exc
     except (urllib.error.URLError, socket.timeout, TimeoutError) as exc:
-        raise ProviderDenial(f"provider unreachable: {exc}") from exc
+        _reraise_transport(exc)
     except json.JSONDecodeError as exc:
         raise ProviderDenial(f"provider returned non-JSON: {exc}") from exc
+
+
+def _reraise_transport(exc: BaseException) -> "ProviderDenial":
+    """Turn a transport failure into the most specific thing we can say about it.
+
+    A certificate failure is a fixable setup problem on this machine, not an
+    unreachable provider. Reported as the latter it sends people looking at their
+    network, or at us, for something one command repairs.
+    """
+    if isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError):
+        raise ProviderDenial(f"{tls_advice()}\n\n  underlying: {exc.reason}",
+                             tls=True) from exc
+    raise ProviderDenial(f"provider unreachable: {exc}") from exc
 
 
 def read_key(env_name: str) -> str:

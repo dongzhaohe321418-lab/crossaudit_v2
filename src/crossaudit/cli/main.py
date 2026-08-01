@@ -163,6 +163,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     add("provider", cfg.auditor.provider in ("anthropic", "openai_compat", "replay"),
         f"{cfg.auditor.provider}:{cfg.auditor.model}", "check auditor.provider")
 
+    # A trust store this interpreter cannot read fails every call to every
+    # vendor, and does it at the moment someone types their first sentence.
+    # Costs nothing to check here, where the fix still reads as setup.
+    from ..providers.base import tls_context
+
+    certs = len(tls_context().get_ca_certs())
+    add("tls trust store", bool(certs),
+        f"{certs} root certificate(s)" if certs
+        else "empty — every HTTPS call to a vendor will fail",
+        "pip install certifi, or export SSL_CERT_FILE=/path/to/ca-bundle.pem "
+        "(macOS python.org builds: run Install Certificates.command)")
+
     state_dir = cfg.root / cfg.state_dir
     writable = os.access(state_dir.parent, os.W_OK)
     add("state store", writable, str(state_dir / "state.json"),

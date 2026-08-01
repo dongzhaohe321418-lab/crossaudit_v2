@@ -67,7 +67,7 @@ behind `init`.
 Check it:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.1 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.2 (receipt schema 2)
 ```
 
 <details>
@@ -372,6 +372,7 @@ support.
 | `CROSSAUDIT_GENERATOR_BASE_URL` | a custom endpoint for the generator |
 | `CROSSAUDIT_KEYS_FILE` | where credentials are stored (useful for sandboxes) |
 | `CROSSAUDIT_HIDE_KEYS` | hide keys as you type; visible by default so a typo is visible too |
+| `CROSSAUDIT_CA_BUNDLE` | a root certificate to trust, for a network that inspects TLS; verification is never skipped |
 | `CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT` | permit a non-builtin origin — **this sends your key there**, so it must be explicit |
 
 </details>
@@ -386,6 +387,7 @@ support.
 | `I1 violated: auditor vendor 'x' equals generator vendor 'x'` | both ends are the same vendor — this refusal is **deliberate**; change one |
 | the verdict is `DCL_ONLY` | no model audited it. Check `$CROSSAUDIT_AUDITOR_KEY`; `doctor` will point at it |
 | `$… is not set in this process, though …keys.env has it` | the key is stored but this process started before it was. `source ~/.crossaudit-keys.env`, or restart the console with `crossaudit console --stop && crossaudit console` |
+| `certificate verify failed: unable to get local issuer certificate` | this Python's trust store is empty. `pip install certifi`, or on a python.org build run `/Applications/Python 3.x/Install Certificates.command`. `crossaudit doctor` reports it as **tls trust store** before you ever call a model |
 | `endpoint … is not this provider's built-in origin` | a custom `base_url` needs an explicit `--allow-custom-endpoint` |
 | `install mode source/editable may verify but never admit` | such an install can change its code after reporting its own digest. Install the wheel to admit |
 | the console returns 403 | wrong token, or `Host` is not localhost. Get the right URL from `crossaudit console --status` |
@@ -435,7 +437,7 @@ Three principles run through all of it:
 
 ## Status
 
-`2.7.1`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
+`2.7.2`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
 closed `build` loop, the one-shot dispute channel, domain-neutral checks,
 allowlisted check-pack plugins, the paired-repository wizard, evidence-based
 admission tiering, a live-pushed browser dashboard, and a console that outlives

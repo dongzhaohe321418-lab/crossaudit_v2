@@ -70,7 +70,7 @@ lives behind `init`.
 验证:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.1 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.2 (receipt schema 2)
 ```
 
 <details>
@@ -351,6 +351,7 @@ agent 之间**追责。
 | `CROSSAUDIT_GENERATOR_BASE_URL` | 执行端自定义 endpoint |
 | `CROSSAUDIT_KEYS_FILE` | 改密钥文件位置(沙箱用) |
 | `CROSSAUDIT_HIDE_KEYS` | 输入密钥时隐藏;默认可见,好让你看见有没有输错 |
+| `CROSSAUDIT_CA_BUNDLE` | 要信任的根证书,用于会拦截 TLS 的网络;但永远不会跳过校验 |
 | `CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT` | 允许非内置 origin——**会把密钥发去那里**,所以必须显式开 |
 
 </details>
@@ -365,6 +366,7 @@ agent 之间**追责。
 | `I1 violated: auditor vendor 'x' equals generator vendor 'x'` | 两端同厂——这是**故意拒绝**,换一端的厂商 |
 | 裁定是 `DCL_ONLY` | 没有模型审计过。检查 `$CROSSAUDIT_AUDITOR_KEY`,`doctor` 会指出来 |
 | `$… is not set in this process, though …keys.env has it` | 密钥已存,但这个进程启动得更早。`source ~/.crossaudit-keys.env`,或 `crossaudit console --stop && crossaudit console` 重启控制台 |
+| `certificate verify failed: unable to get local issuer certificate` | 这个 Python 的信任库是空的。`pip install certifi`,或在 python.org 版上运行 `/Applications/Python 3.x/Install Certificates.command`。`crossaudit doctor` 会以 **tls trust store** 提前报出来 |
 | `endpoint … is not this provider's built-in origin` | 用了自定义 base_url,需显式 `--allow-custom-endpoint` |
 | `install mode source/editable may verify but never admit` | 可验证但不可准入——它的代码能在自报摘要后被改。装 wheel 才能准入 |
 | 控制台 403 | token 不对,或 `Host` 不是 localhost。用 `crossaudit console --status` 拿正确 URL |
@@ -406,7 +408,7 @@ pip uninstall crossaudit
 
 ## 状态 · Status
 
-`2.7.1`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
+`2.7.2`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
 争议、领域中立检查包、检查包插件、双仓向导、准入档位自证、实时推送的浏览器面板、
 后台常驻与重连。未落地:enforced 档的实地证据、PyPI 发行。
 

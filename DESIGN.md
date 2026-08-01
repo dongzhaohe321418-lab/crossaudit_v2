@@ -368,6 +368,31 @@ wizard is arrow-key driven and dependency-free; every interactive primitive has
 a non-interactive answer, so a piped stdin or a CI job takes defaults rather
 than blocking on a keypress that will never arrive.
 
+## 6.7 控制台信息架构 · What the dashboard shows
+
+**中文** — 版面按人真正发问的顺序排:**指标带**(进展如何)→ **五步流水线**
+(这个增量走到哪了)→ **两个对话窗** → **等你处理 / 规则抓到了什么 / 争议**。
+输入框始终在底部:一个框,程序决定谁听见。
+
+三条它拒绝做的事——一个做了这些的监督面板,比没有面板更糟:
+
+1. **绝不显示账本支撑不了的数字**。没测过就显示"not measured",不显示 0——
+   "零次升级"和"我们从没看过"是两个不同的断言,只有一个适合放大字号。
+2. **绝不把没发生的步骤涂成绿色**。没人走到的步骤是 pending,不是 passed;
+   BLOCKED 时"准入"显示"not reached",而不是失败。
+3. **绝不暗示控制台自己做了什么**。每个动作都跑同一套 CLI 动词。
+
+**更新靠推送**:服务端每 0.4 秒重新推导、只在摘要变化时才发一帧,空闲项目
+15 秒一次心跳;EventSource 断了自动退回轮询——一种传输不可用就整页空白,比慢
+一秒糟得多。
+
+**EN** — The layout answers questions in the order people ask them: metrics, the
+five-step pipeline, the two conversations, then what is waiting on you. It never
+shows a figure the ledger cannot support (absent renders as absent, not zero),
+never colours a step green before it happened, and never implies the console
+acted on its own. Updates are pushed — a frame goes out only when the snapshot
+digest moves — with polling as the fallback.
+
 ## 7. 分层 · Layering
 
 ```

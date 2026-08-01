@@ -131,6 +131,18 @@ Two windows — the generator's work on the left, the auditor's judgement on the
 right — and one input at the bottom. Type as you would to any assistant; the box
 decides which side hears it, and shows you the decision and how sure it was.
 
+打开是一块一眼能读懂的面板:**指标带**(审计数 / 通过 / 拦截 / 等你处理 /
+已准入)、**五步流水线**(提交 → 检查 → 审计 → 裁定 → 准入,逐格着色)、
+**执行端与审计端两个对话窗**、以及**等你处理 / 规则抓到了什么 / 争议**三张卡。
+底部仍然是那一个输入框。
+
+数据**实时推送**——服务端只在状态真的变了才发一帧,连接状态在右上角亮着;
+断线自动退回轮询。
+
+An overview you can read at a glance: a metric band, the five steps of the loop
+with each one coloured by what actually happened, the two conversations, and
+what is waiting on you. Updates are pushed the moment anything changes.
+
 说完就能**看着它干活**:生成端写了哪些文件、审计端拦在哪条规则、findings 打回去
 第几轮、计时多少秒——逐步出现,不用等整轮跑完。进度只在内存里,随进程消失;
 记录始终是账本。

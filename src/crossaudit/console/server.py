@@ -22,6 +22,7 @@ the defences are structural rather than promised:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -34,12 +35,14 @@ from ..config import Config
 from ..controller import StateStore
 from ..errors import Denial
 from ..router import history as routing_history
-from . import daemon
+from . import daemon, overview
 from .page import PAGE
 from .progress import TRACKER
 from .streams import both
 
 IDLE_TIMEOUT_S = 900.0
+STREAM_POLL_S = 0.4          # how often the server re-derives, not how often it sends
+STREAM_HEARTBEAT_S = 15.0
 MAX_UTTERANCE = 4000
 ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 
@@ -49,13 +52,14 @@ def snapshot(cfg: Config) -> dict:
     from .. import skills as skills_mod
 
     store = StateStore(cfg.root / cfg.state_dir / "state.json")
-    cycles = store.snapshot().get("cycles", {})
+    states = store.snapshot().get("cycles", {})
     caps = store.capabilities()
     tier = adm.assess(root=cfg.root, paired=bool(cfg.audit_repo),
                       controller_persistent=caps["persistent"],
                       controller_atomic=caps["atomic"], online=False)
     const = cfg.root / cfg.constitution
     gen_stream, aud_stream = both(cfg)
+    audits = overview.read_cycles(cfg)
     try:
         house = [s.name for s in skills_mod.load(cfg.root)]
     except Denial:
@@ -69,8 +73,16 @@ def snapshot(cfg: Config) -> dict:
         # Presence, never the value: a console that can show a key can leak one.
         "key_present": bool(os.environ.get(cfg.auditor.key_env, "").strip()),
         "cycles": [{"id": cid, "status": c["status"], "round": c["round"],
-                    "sha": c["active_sha"]} for cid, c in sorted(cycles.items())],
+                    "sha": c["active_sha"]} for cid, c in sorted(states.items())],
         "tier": tier.as_dict(),
+        # Every figure below is derived from the ledger; where it cannot answer,
+        # the answer is absent rather than a confident zero.
+        "metrics": overview.metrics(cfg, audits),
+        "pipeline": overview.pipeline(cfg, audits),
+        "findings": overview.findings_by_severity(audits),
+        "top_rules": overview.top_rules(audits),
+        "escalations": overview.escalations(cfg),
+        "disputes": overview.disputes(cfg),
         "routing": routing_history(cfg.root / cfg.ledger_dir / "routing.jsonl", 40),
         "generator_stream": gen_stream,
         "auditor_stream": aud_stream,
@@ -201,8 +213,48 @@ def make_handler(cfg: Config, token: str, touch) -> type:
                 self._send(PAGE.encode(), "text/html; charset=utf-8")
             elif parsed.path == "/api/state":
                 self._send(json.dumps(snapshot(cfg)).encode(), "application/json")
+            elif parsed.path == "/api/stream":
+                self._stream(cfg, touch)
             else:
                 self._deny(404, "no such page")
+
+        def _stream(self, cfg: Config, touch) -> None:
+            """Push a snapshot whenever anything changes.
+
+            The server re-derives often and sends rarely: a frame goes out only
+            when the digest moves, so an idle project costs one heartbeat every
+            fifteen seconds rather than a stream of identical payloads. Each push
+            counts as activity, otherwise a browser watching a long build in
+            silence would look idle and the console would shut itself down.
+            """
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream; charset=utf-8")
+            self.send_header("cache-control", "no-store")
+            self.send_header("connection", "close")
+            self.send_header("content-security-policy",
+                             "default-src 'none'; style-src 'unsafe-inline'; "
+                             "script-src 'unsafe-inline'; connect-src 'self'")
+            self.end_headers()
+            last_digest = ""
+            last_beat = time.monotonic()
+            try:
+                while True:
+                    payload = json.dumps(snapshot(cfg), sort_keys=True)
+                    digest = hashlib.sha256(payload.encode()).hexdigest()
+                    now = time.monotonic()
+                    if digest != last_digest:
+                        self.wfile.write(f"data: {payload}\n\n".encode())
+                        self.wfile.flush()
+                        last_digest, last_beat = digest, now
+                        touch()
+                    elif now - last_beat > STREAM_HEARTBEAT_S:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                        last_beat = now
+                        touch()
+                    time.sleep(STREAM_POLL_S)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return                      # the tab closed; nothing to clean up
 
         def do_POST(self) -> None:                                  # noqa: N802
             parsed = urlparse(self.path)

@@ -170,6 +170,28 @@ supervision, the thing the protocol exists to prevent.
 
 ---
 
+## 4.4 House skills 外置技能
+
+**中文** — 用户可以给执行端写 skill(`skills/*.md`):行文风格、领域惯例、
+清单、范例——让产出"长成这个项目要的样子",不必每轮重说一遍。可选 front-matter
+的 `applies_to` 限定它在哪些路径的回合生效。
+
+划死的那条线:**skill 改变执行端"怎么写",绝不改变它"能写到哪"和"由谁判"**。
+
+| 保证 | 机制 |
+|---|---|
+| skill 永不到达审计端 | 审计端只看已提交工件 + 已提交宪法。能对审计端说话的 skill 就是一条没版本的规则,正是 P3 要防的 |
+| skill 无法扩权 | 可写目录由 `scope.dirs` 决定;写着"你也可以改 AUDIT_RULES.md"的 skill 只是一份有主张的文本,路径守卫才是裁决者 |
+| skill 入账 | 它塑造了产出,就属于"产出如何形成"的一部分(I2);清单与哈希进回执,换了 skill 就是另一轮 |
+| skill 不能冒充规则 | prompt 里分栏、标注、次序在后:规则约束,skill 建议,冲突时规则胜出 |
+
+**EN** — Users may write skills for the generator. A skill changes *how* the
+work is done, never *where* it may be written or *who* judges it: skills never
+reach the auditor (one that could would be an unversioned rule), cannot widen
+`scope.dirs` (the path guard decides, not the text), are hashed into the
+receipt (they shaped the output, so I2 applies), and are fenced below the rules
+in the prompt so they can never read as law.
+
 ## 5. 通用性 · Domain generality
 
 **中文** — 八条不变量通篇没有一个字提"科学"。v2 明确面向**任何"产出能落成

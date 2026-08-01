@@ -48,6 +48,7 @@ def isolation_evidence(cfg: Config, *, mode: str, provisioner: str,
 def build(*, cfg: Config, subject: dict, cycle: dict, manifest: dict,
           constitution_path: str, constitution_bytes: bytes, constitution_commit: str,
           dcl_source_sha256: str, prompt_sha256: str, checks: list[str],
+          skills: dict | None = None,
           verdict: str, exchange: dict, retention: str, report_bytes: bytes,
           report_commit: str, cycle_path: str, audit_repo: str,
           mode: str, provisioner: str = "cli", admission: str = "local-controller",
@@ -76,6 +77,9 @@ def build(*, cfg: Config, subject: dict, cycle: dict, manifest: dict,
             "dcl_source_sha256": dcl_source_sha256,
             "prompt_sha256": prompt_sha256,
             "checks": checks,
+            # Which house skills shaped this round, and their hashes. A round run
+            # under different guidance is a different round, and the ledger says so.
+            "skills": skills or {},
         },
         "audit": {
             "verdict": verdict,

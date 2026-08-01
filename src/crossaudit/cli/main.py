@@ -74,6 +74,16 @@ def _emit(obj: dict, as_json: bool, human: str = "") -> None:
         print(human)
 
 
+def _skills_manifest(cfg: Config) -> dict:
+    """House skills in force, by path and hash, for the receipt."""
+    from .. import skills as skills_mod
+
+    try:
+        return skills_mod.manifest(skills_mod.load(cfg.root))
+    except Denial:
+        return {}                     # a broken skill is reported by doctor, not here
+
+
 def _state(cfg: Config) -> StateStore:
     """The state store lives beside the configuration, never in site-packages."""
     return StateStore(cfg.root / cfg.state_dir / "state.json")
@@ -306,7 +316,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
         cycle=cycle, manifest=manifest, constitution_path=cfg.constitution,
         constitution_bytes=const_path.read_bytes(), constitution_commit=const_commit,
         dcl_source_sha256=dcl_source_digest(), prompt_sha256=outcome.prompt_sha256,
-        checks=cfg.checks, verdict=outcome.verdict, exchange=outcome.exchange,
+        checks=cfg.checks, skills=_skills_manifest(cfg),
+        verdict=outcome.verdict, exchange=outcome.exchange,
         retention=args.retention, report_bytes=report_path.read_bytes(),
         report_commit=report_commit, cycle_path=str(ledger.relative_to(cfg.root)),
         audit_repo=cfg.audit_repo or "local", mode=args.mode,
@@ -393,6 +404,46 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     print(f"cycle is now {c['status']} (round {c['round']}); "
           + ("run `crossaudit run` to re-audit." if action == "reopen"
              else "the increment stays out of the record."))
+    return EXIT_OK
+
+
+def cmd_skills(args: argparse.Namespace) -> int:
+    """Show the house skills, or write a starter one.
+
+    Skills shape how the generator works. They are deliberately not rules: the
+    auditor never sees them, so nothing here can move the bar the work is judged
+    against — that is what `amend` is for, and why it leaves a dated record.
+    """
+    from .. import skills as skills_mod
+
+    cfg = load()
+    base = cfg.root / skills_mod.SKILLS_DIR
+    if args.new:
+        base.mkdir(parents=True, exist_ok=True)
+        target = base / f"{args.new}.md"
+        if target.exists():
+            raise ConfigDenial(f"{target} already exists")
+        target.write_text(skills_mod.TEMPLATE)
+        print(f"wrote {target.relative_to(cfg.root)} — edit it, commit it, and the "
+              f"generator follows it from the next round.")
+        return EXIT_OK
+
+    house = skills_mod.load(cfg.root)
+    if not house:
+        print(f"No skills yet. `crossaudit skills --new house-style` writes one.\n"
+              f"A skill is guidance on how to work: conventions, the shape of a good\n"
+              f"output, worked examples. The standards your work is judged by are the\n"
+              f"Constitution instead, because those need a dated record when they move.")
+        return EXIT_OK
+    rows = [{"name": s.name, "path": s.path, "applies_to": list(s.applies_to),
+             "sha256": s.digest} for s in house]
+    human = ["house skills (guidance for the generator; the auditor never sees them)",
+             "-" * 72]
+    for s in house:
+        scope = ", ".join(s.applies_to) if s.applies_to else "every round"
+        human.append(f"  {s.name:22s} {scope}")
+        human.append(f"  {'':22s} {s.path}  {s.digest[:12]}")
+    _emit({"skills": rows}, args.json, "\n".join(human))
     return EXIT_OK
 
 
@@ -646,7 +697,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         cycle=cycle, manifest=manifest, constitution_path=cfg.constitution,
         constitution_bytes=const_text.encode(), constitution_commit=const_commit,
         dcl_source_sha256=dcl_source_digest(), prompt_sha256=outcome.prompt_sha256,
-        checks=cfg.checks, verdict=outcome.verdict, exchange=outcome.exchange,
+        checks=cfg.checks, skills=_skills_manifest(cfg),
+        verdict=outcome.verdict, exchange=outcome.exchange,
         retention="sealed", report_bytes=outcome.report.encode(),
         report_commit=report_commit, cycle_path=str(rel),
         audit_repo=cfg.audit_repo or "local", mode="local",
@@ -752,6 +804,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("watch", help="live view: generator, auditor, and their conversation")
     w.set_defaults(func=cmd_watch)
+
+    sk = sub.add_parser("skills", help="house guidance for the generator")
+    sk.add_argument("--new", metavar="NAME", help="write a starter skill")
+    sk.set_defaults(func=cmd_skills)
 
     co = sub.add_parser("console", help="read-only ledger in a browser (loopback)")
     co.add_argument("--port", type=int, default=0, help="0 picks a free port")

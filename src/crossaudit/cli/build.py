@@ -26,9 +26,11 @@ import os
 from pathlib import Path
 
 from .. import generator as gen_mod
+from .. import skills as skills_mod
 from ..config import Config, heterogeneity, load
 from ..controller import StateStore
-from ..errors import EXIT_ESCALATED, EXIT_OK, ConfigDenial, Denial
+from ..errors import (EXIT_ESCALATED, EXIT_OK, ConfigDenial, Denial,
+                      ProviderDenial)
 from ..gitio import git, is_repo
 from ..providers import get_provider
 from ..providers.registry import NEEDS_KEY
@@ -121,9 +123,13 @@ def cmd_build(args) -> int:
     else:
         # The task joins the ledger too: a reader asking "why does this exist"
         # should find the answer in the repository, not in someone's terminal.
+        # Restating the same task is not a change, and git has nothing to commit
+        # for it — re-running a build must not fail on that.
+        unchanged = task_path.is_file() and task_path.read_text().strip() == task.strip()
         task_path.write_text(task + "\n")
-        git("add", "--", TASK_FILE, cwd=cfg.root)
-        git("commit", "-q", "-m", f"task: {task.splitlines()[0][:68]}", cwd=cfg.root)
+        if not unchanged:
+            git("add", "--", TASK_FILE, cwd=cfg.root)
+            git("commit", "-q", "-m", f"task: {task.splitlines()[0][:68]}", cwd=cfg.root)
 
     allow_custom = bool(os.environ.get("CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT"))
     complete = _generator_complete(cfg, allow_custom)
@@ -135,15 +141,34 @@ def cmd_build(args) -> int:
     print(f"  task     {task.splitlines()[0][:60]}")
     print(f"  rules    {cfg.constitution} ({constitution.count(chr(10) + '### ')} rules)")
     print(f"  writing  {', '.join(cfg.scope_dirs)}/")
+    house = skills_mod.load(cfg.root)
+    if house:
+        print(f"  skills   {', '.join(s.name for s in house)}")
     print(f"  rounds   up to {cfg.max_rounds}, then it goes to you")
 
     findings = ""
     for round_no in range(1, cfg.max_rounds + 1):
         print(f"\n  ── round {round_no} ─────────────────────────────────────")
         print("  generator  writing…", end="", flush=True)
-        work = gen_mod.generate(task=task, constitution=constitution,
-                                current=_current_work(cfg), complete=complete,
-                                findings=findings, allowed_dirs=cfg.scope_dirs)
+        current = _current_work(cfg)
+        in_force = skills_mod.select(house, list(current) or cfg.scope_dirs)
+        try:
+            work = gen_mod.generate(task=task, constitution=constitution,
+                                    current=current, complete=complete,
+                                    findings=findings, allowed_dirs=cfg.scope_dirs,
+                                    skills=skills_mod.render(in_force))
+        except ProviderDenial as exc:
+            # An overreaching or malformed round is a refused round, not a crashed
+            # loop: the generator is told what the guard refused and gets its next
+            # attempt, inside the same budget. Crashing here would make a bounded
+            # revision loop fail open into a human's lap for something it can fix.
+            print(f"\r  generator  refused — {exc.reason[:88]}")
+            findings = (f"[BLOCKER] Your last round was refused before it reached "
+                        f"the auditor: {exc.reason}\nReturn only files inside "
+                        f"{', '.join(cfg.scope_dirs)}/ and try again.")
+            if round_no == cfg.max_rounds:
+                break
+            continue
         written = gen_mod.apply(work, cfg.root)
         print(f"\r  generator  {len(written)} file(s): {', '.join(written[:3])}"
               + (" …" if len(written) > 3 else ""))

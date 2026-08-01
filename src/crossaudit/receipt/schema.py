@@ -24,7 +24,7 @@ REQUIRED_TOP = ("receipt_schema", "subject", "cycle", "inputs", "audit", "ledger
 REQUIRED_SUBJECT = ("science_repo", "sha", "tree", "scope")
 REQUIRED_CYCLE = ("cycle_id", "root_sha", "active_sha", "parent_receipt", "round")
 REQUIRED_INPUTS = ("manifest", "constitution_sha256", "constitution_commit",
-                   "dcl_source_sha256", "prompt_sha256", "checks")
+                   "dcl_source_sha256", "prompt_sha256", "checks", "skills")
 REQUIRED_AUDIT = ("verdict", "provider", "model", "vendor", "audit_integrity",
                   "exchange", "retention")
 REQUIRED_LEDGER = ("audit_repo", "report_commit", "cycle_path", "report_sha256")

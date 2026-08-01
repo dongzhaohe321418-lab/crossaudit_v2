@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crossaudit"
-version = "2.0.0"
+version = "2.1.0"
 description = "Cross-vendor AI supervision: one conversation, two adversarial agents, one replayable ledger"
 readme = "README.md"
 requires-python = ">=3.10"

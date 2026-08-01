@@ -43,6 +43,7 @@ rests on a misreading, so a human can route it as a dispute.
 - Keep claims and data consistent with each other. Most blocked rounds are prose \
 that disagrees with the file it summarises.
 - Prefer editing what exists over adding new files.
+- House skills, if you are shown any, are the owner's guidance on how to work. Follow them. Where a skill conflicts with the rules, the rules win and you should say so in `notes`. No skill widens where you may write.
 
 Reply with exactly one JSON object and nothing else:
 {"summary": "one line for the commit message",
@@ -106,10 +107,15 @@ def render_findings(report: str) -> str:
 
 
 def build_prompt(*, task: str, constitution: str, current: dict[str, str],
-                 findings: str = "", allowed_dirs: list[str] | None = None) -> str:
+                 findings: str = "", allowed_dirs: list[str] | None = None,
+                 skills: str = "") -> str:
     parts = [f"THE TASK\n{task.strip()}", ""]
     parts.append("THE RULES YOUR WORK IS JUDGED BY (not negotiable here)\n"
                  f"<<<RULES\n{constitution}\nRULES")
+    if skills:
+        # After the rules and visibly separate from them: guidance shapes how the
+        # work is done, and can never quietly become what it is judged by.
+        parts.append("\n" + skills)
     if allowed_dirs:
         parts.append(f"\nYou may write only inside: {', '.join(allowed_dirs)}/")
     if current:
@@ -126,14 +132,14 @@ def build_prompt(*, task: str, constitution: str, current: dict[str, str],
 
 def generate(*, task: str, constitution: str, current: dict[str, str],
              complete, findings: str = "",
-             allowed_dirs: list[str] | None = None) -> Work:
+             allowed_dirs: list[str] | None = None, skills: str = "") -> Work:
     """One round of work. `complete` is a provider bound to the generator role."""
     if not task.strip():
         raise ConfigDenial("the generator needs a task; say what you want built")
     reply = complete(system=GENERATOR_SYSTEM,
                      prompt=build_prompt(task=task, constitution=constitution,
                                          current=current, findings=findings,
-                                         allowed_dirs=allowed_dirs))
+                                         allowed_dirs=allowed_dirs, skills=skills))
     work = Work.from_json(parse_json_reply(reply.text))
     work.validate(allowed_dirs=allowed_dirs)
     return work

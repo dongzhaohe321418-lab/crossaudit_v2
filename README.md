@@ -79,11 +79,33 @@ crossaudit talk "那次拦错了,0.052 是引用原文"   # → 争议:回审计
 
 The program decides the lane. **When unsure it asks; it never guesses.**
 
+## 定制执行端 House skills
+
+给执行端写 skill,让产出长成这个项目要的样子:
+
+```bash
+crossaudit skills --new house-style   # 写一份模板
+crossaudit skills                     # 看当前生效的
+```
+
+`skills/*.md` 是你的行文风格、领域惯例、范例、完成前的检查步骤;front-matter 里
+可选 `applies_to: work/` 限定它在哪些回合生效。
+
+**边界是硬的**:skill 改变执行端*怎么写*,绝不改变它*能写到哪*、*由谁判*。
+审计端永远看不到 skill——能对审计端说话的 skill 就是一条没人同意过、没有版本的
+规则。skill 说"你也可以改规则文件"也没用:路径守卫才是裁决者,那一轮会被当场
+打回(循环自己继续,不崩)。skill 的哈希进回执,换了 skill 就是另一轮。
+
+A skill shapes how the generator works, never what it may touch or who judges
+it. The auditor never sees them; the path guard, not the text, decides where the
+generator may write; and their hashes go into the receipt.
+
 ## 打开箱子 Opening the box
 
 外壳不透明是为了好用;内胆是玻璃做的:
 
 ```bash
+crossaudit skills      # 执行端的外置技能:生效范围与哈希
 crossaudit console     # 浏览器只读窗口:周期、路由、争议、真实准入档位
 crossaudit routing     # 每一次路由决定:原话、车道、置信度、实际执行了什么
 crossaudit watch       # 执行端与审计端的往来对话,从账本重建

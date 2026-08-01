@@ -84,6 +84,7 @@ The program decides the lane. **When unsure it asks; it never guesses.**
 外壳不透明是为了好用;内胆是玻璃做的:
 
 ```bash
+crossaudit console     # 浏览器只读窗口:周期、路由、争议、真实准入档位
 crossaudit routing     # 每一次路由决定:原话、车道、置信度、实际执行了什么
 crossaudit watch       # 执行端与审计端的往来对话,从账本重建
 crossaudit status      # 每个周期的状态
@@ -124,6 +125,23 @@ standards can be stated as rules, it runs. Where no domain check pack exists,
 the deterministic layer contributes nothing and the model audit carries the load
 alone — the program says so rather than glossing over it.
 
+## 它会说自己够不着的档位 It names the tier it cannot reach
+
+```
+crossaudit doctor
+  [PASS] admission tier   local — self-review; the history is yours to rewrite
+  [PASS]   toward enforced  the history can be rewritten by whoever holds it
+```
+
+四档:`local` 只能自省 · `remote` 历史脱离单方控制 · `paired` 两个 agent 之间
+可互相追责 · `enforced` 审计不过就拒绝合并。**enforced 要四件同时成立**,而且
+全部实测:controller 自己跑一次锁来证明持久与原子,分支保护由 `gh` 读真实规则。
+差一件就诚实降级为 `verified-notification`——"发布裁定"不等于"拒绝合并"。
+
+Four tiers, and it tells you the one you are actually at. "Enforced" requires
+four things at once, each probed rather than inferred; anything less is named
+`verified-notification`, because publishing a verdict is not refusing a merge.
+
 ## 为什么必须 git Why git is mandatory
 
 追责的四个要件都由 commit 提供:审的是什么(SHA + tree 哈希)、审后有没有被改
@@ -142,17 +160,19 @@ paired-repository tier exists for privilege separation between the two agents.
 
 ## 状态 Status
 
-`2.0.0a4`. 已落地:对话式宪法蒸馏、路由器(六车道全通)、`build` 闭环、
+`2.0.0`. 已落地:对话式宪法蒸馏、路由器(六车道全通)、`build` 闭环、
 **争议车道**(一次性、审计端自裁)、**领域中立检查包**(4 项,非科研可用)、
-**检查包插件**(allowlist + API 版本校验)、**`pair` 双仓向导**(先 plan 后
-`--apply`),以及 v1 的完整引擎。未落地:enforced 准入档(需独立持久 controller
-+ GitHub App)、浏览器控制台。路线图见 [DESIGN.md §8](DESIGN.md)。
+**检查包插件**(allowlist + API 版本校验)、**`pair` 双仓向导**(先 plan 后 `--apply`)、
+**准入档位自证**(四档,平台实测而非配置声明)、**`console` 只读控制台**
+(stdlib 零依赖、回环、token、Host 校验、结构上无写入路径),以及 v1 的完整引擎。
+下一步:独立安全复核、真实 enforced 部署证据、PyPI 发行。
+路线图见 [DESIGN.md §8](DESIGN.md)。
 
-Landed: everything through a4 — spoken rules, the six-lane router, the closed
+Landed: everything through 2.0 — spoken rules, the six-lane router, the closed
 build loop, the one-shot dispute channel, domain-neutral checks, allowlisted
-check-pack plugins, and the paired-repository wizard. Not yet: the enforced
-admission tier (needs an independent persistent controller and a GitHub App),
-and the browser console.
+plugins, the paired-repository wizard, evidence-based admission tiering, and the
+read-only console. Next: independent security review, evidence from a real
+enforced deployment, and PyPI distribution.
 
 ## 许可 License
 

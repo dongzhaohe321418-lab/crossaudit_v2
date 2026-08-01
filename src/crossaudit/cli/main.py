@@ -180,7 +180,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         gh_ok, gh_detail = wizard.gh_available()
         add("gh cli", gh_ok, gh_detail, "install gh and run `gh auth login`")
 
-    _emit({"ok": ok, "checks": checks, "verifier": ident}, args.json,
+    # The tier this deployment can honestly claim, from evidence rather than
+    # from configuration. Reported always: a system that only mentions its
+    # weaknesses when asked is not being honest, it is being quiet.
+    from .. import admission as adm
+
+    caps = _state(cfg).capabilities()
+    verdict = adm.assess(root=cfg.root, paired=bool(cfg.audit_repo),
+                         controller_persistent=caps["persistent"],
+                         controller_atomic=caps["atomic"], online=args.online)
+    checks.append({"check": "admission tier", "ok": True,
+                   "detail": f"{verdict.tier} — {adm.TIER_MEANING[verdict.tier]}",
+                   "fix": ""})
+    for s in verdict.shortfalls:
+        checks.append({"check": "  toward enforced", "ok": True, "detail": s,
+                       "fix": ""})
+
+    _emit({"ok": ok, "checks": checks, "verifier": ident,
+           "admission": verdict.as_dict() if args.online or True else {}}, args.json,
           _render_doctor(checks, ok))
     return EXIT_OK if ok else EXIT_CONFIG
 
@@ -376,6 +393,26 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     print(f"cycle is now {c['status']} (round {c['round']}); "
           + ("run `crossaudit run` to re-audit." if action == "reopen"
              else "the increment stays out of the record."))
+    return EXIT_OK
+
+
+def cmd_console(args: argparse.Namespace) -> int:
+    """Open the read-only window. Loopback, tokenised, and it writes nothing."""
+    from ..console import serve
+
+    cfg = load()
+    url, httpd = serve(cfg, port=args.port)
+    # Flushed explicitly: stdout is block-buffered when it is not a terminal, and
+    # a URL the user cannot see until the process exits is a URL they do not have.
+    print(f"\n  CrossAudit console — read-only\n  {url}\n\n"
+          "  Loopback only, and the token above is required on every request, so a\n"
+          "  page you visit elsewhere cannot reach it. Nothing here can change\n"
+          "  anything: actions live in the CLI. Closes when idle; Ctrl-C to stop.",
+          flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n  closed")
     return EXIT_OK
 
 
@@ -715,6 +752,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("watch", help="live view: generator, auditor, and their conversation")
     w.set_defaults(func=cmd_watch)
+
+    co = sub.add_parser("console", help="read-only ledger in a browser (loopback)")
+    co.add_argument("--port", type=int, default=0, help="0 picks a free port")
+    co.set_defaults(func=cmd_console)
 
     pr = sub.add_parser("pair", help="create the two repositories (plan, then --apply)")
     pr.add_argument("--science", help="owner/name for the work repository")

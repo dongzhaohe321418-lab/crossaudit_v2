@@ -244,6 +244,43 @@ class StateStore:
                       reason=reason[:400])
             return dict(c, cycle_id=cycle_id)
 
+    # ------------------------------------------------------- self-attestation
+    def capabilities(self) -> dict:
+        """What this store can actually promise, tested rather than declared.
+
+        The admission tier turns on two properties of the controller, and a
+        configuration file claiming them proves nothing. Both are probed here:
+        persistence by asking whether the store lives outside any ephemeral
+        checkout, and atomicity by exercising the lock this process would rely
+        on. A store that cannot demonstrate both never supports enforced
+        admission, however it is configured.
+        """
+        ephemeral_markers = ("/tmp/", "/var/folders/", "/runner/work/",
+                             "/home/runner/", "/private/tmp/")
+        path = str(self.path)
+        persistent = not any(m in path for m in ephemeral_markers)
+
+        atomic = False
+        detail = ""
+        try:
+            with self._locked() as state:
+                state.setdefault("cycles", {})
+                # If the lock is real, a second acquisition from this process
+                # must fail while we hold it.
+                try:
+                    fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.close(fd)
+                    detail = "the lock did not exclude a second holder"
+                except FileExistsError:
+                    atomic = True
+        except Exception as exc:                       # noqa: BLE001
+            detail = f"the store could not be locked: {exc}"
+
+        return {"path": path, "persistent": persistent, "atomic": atomic,
+                "why_not": detail or ("" if persistent else
+                                      "the store is in a location that does not "
+                                      "outlive the run that wrote it")}
+
     def mark_deadlettered(self, cycle_id: str, issue_ref: str) -> None:
         with self._locked() as state:
             c = state["cycles"].get(cycle_id)

@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crossaudit"
-version = "2.0.0a4"
+version = "2.0.0"
 description = "Cross-vendor AI supervision: one conversation, two adversarial agents, one replayable ledger"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,7 +23,7 @@ authors = [
 ]
 keywords = ["ai supervision", "auditing", "agents", "provenance", "research integrity"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",

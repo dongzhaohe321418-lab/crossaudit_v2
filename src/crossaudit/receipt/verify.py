@@ -98,12 +98,41 @@ def verify(receipt: dict, *, science_root: Path, audit_root: Path,
     elif report_commit:
         raise IntegrityDenial("report commit named by the receipt is not in the audit repo")
 
+    admission_shortfalls = []
+    if receipt["audit"]["verdict"] != "PASS":
+        admission_shortfalls.append(
+            f"verdict is {receipt['audit']['verdict']}, not PASS")
+    if receipt["audit"]["audit_integrity"] != "OK":
+        admission_shortfalls.append(
+            f"audit integrity is {receipt['audit']['audit_integrity']}")
+    if cfg is not None:
+        short = schema.isolation_shortfall(receipt, cfg.isolation_minimum)
+        if short:
+            admission_shortfalls.append(
+                f"isolation evidence is missing {short}")
+
+    return {
+        "receipt_digest": schema.digest(receipt),
+        "sha": subject["sha"],
+        "cycle_id": receipt["cycle"]["cycle_id"],
+        "verified": True,
+        "admission_ready": not admission_shortfalls,
+        "admission_shortfalls": admission_shortfalls,
+    }
+
+
+def admit(receipt: dict, store: StateStore, evidence: dict,
+          cfg: Config | None = None) -> dict:
+    """Consume the receipt once, in the controller's lock.
+
+    Refuses install modes that cannot stand behind their own digest, because an
+    admission is exactly the moment that identity has to hold.
+    """
     if receipt["audit"]["verdict"] != "PASS":
         raise IntegrityDenial(f"verdict is {receipt['audit']['verdict']}, not PASS — "
                               f"nothing to admit", verdict=receipt["audit"]["verdict"])
     if receipt["audit"]["audit_integrity"] != "OK":
         raise IntegrityDenial(f"audit integrity: {receipt['audit']['audit_integrity']}")
-
     if cfg is not None:
         short = schema.isolation_shortfall(receipt, cfg.isolation_minimum)
         if short:
@@ -111,20 +140,6 @@ def verify(receipt: dict, *, science_root: Path, audit_root: Path,
                 f"isolation evidence is weaker than this deployment requires: "
                 f"missing {short}", missing=short)
 
-    return {
-        "receipt_digest": schema.digest(receipt),
-        "sha": subject["sha"],
-        "cycle_id": receipt["cycle"]["cycle_id"],
-        "verified": True,
-    }
-
-
-def admit(receipt: dict, store: StateStore, evidence: dict) -> dict:
-    """Consume the receipt once, in the controller's lock.
-
-    Refuses install modes that cannot stand behind their own digest, because an
-    admission is exactly the moment that identity has to hold.
-    """
     ident = _selfid.identity()
     if ident["install_mode"] not in _selfid.ADMISSIBLE_MODES:
         raise IntegrityDenial(

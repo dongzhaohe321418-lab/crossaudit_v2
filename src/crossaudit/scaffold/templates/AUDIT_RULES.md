@@ -21,6 +21,13 @@ the increment. **ADVISORY** is judgement, is recorded, and never gates.
 **BLOCKER.** An audit report cites the rule IDs it applied. A report that cites
 nothing is invalid.
 
+### CA-TASK-001
+**BLOCKER.** When a committed `TASK.md` exists, the increment satisfies every
+objectively testable requirement it states. Substituting a different value,
+file, command, or declared environment is a defect even when the produced files
+are internally consistent. If the task conflicts with this Constitution, the
+auditor escalates instead of choosing one silently.
+
 ### CA-DATA-001
 **BLOCKER.** Every numeric entry in the results file carries a unit and a
 source.

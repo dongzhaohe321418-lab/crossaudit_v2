@@ -43,6 +43,10 @@ class Config:
     max_rounds: int
     auditor: Role
     generator_vendor: str | None
+    generator_provider: str | None
+    generator_model: str | None
+    generator_key_env: str | None
+    generator_base_url: str | None
     isolation_minimum: dict
     state_dir: str
     ledger_dir: str
@@ -96,6 +100,11 @@ def load(path: Path | None = None) -> Config:
 
     auditor = _role(raw["auditor"] or {}, "auditor", p)
     gen = raw.get("generator") or {}
+    if not isinstance(gen, dict):
+        raise ConfigDenial("generator must be a mapping", file=str(p))
+    gen_unknown = set(gen) - _ALLOWED_ROLE
+    if gen_unknown:
+        raise ConfigDenial(f"generator: unknown keys {sorted(gen_unknown)}", file=str(p))
     generator_vendor = gen.get("vendor")
 
     iso_raw = raw.get("isolation") or {}
@@ -139,6 +148,10 @@ def load(path: Path | None = None) -> Config:
         max_rounds=rounds,
         auditor=auditor,
         generator_vendor=generator_vendor,
+        generator_provider=gen.get("provider"),
+        generator_model=gen.get("model"),
+        generator_key_env=gen.get("key_env"),
+        generator_base_url=gen.get("base_url"),
         isolation_minimum={d: bool(minimum.get(d, False)) for d in ISOLATION_DIMS},
         state_dir=state_dir,
         ledger_dir=ledger_dir,

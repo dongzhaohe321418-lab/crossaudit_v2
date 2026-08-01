@@ -14,6 +14,27 @@ from .base import Reply, egress_check, read_key, request_json, sha256_text
 BUILTIN_ORIGIN = "https://api.openai.com"
 
 
+def _completion_token_parameter(model: str, *, builtin_openai: bool = False) -> str:
+    """Return the token-limit field accepted by this OpenAI model family.
+
+    OpenAI's Chat Completions API has replaced ``max_tokens`` with
+    ``max_completion_tokens``. Older OpenAI-compatible services generally
+    still expect the legacy field, so only apply the API-wide rule to the
+    built-in OpenAI origin and keep custom endpoints model-family based.
+    """
+    if builtin_openai:
+        return "max_completion_tokens"
+    lowered = model.lower()
+    modern_families = ("gpt-5", "o1", "o3", "o4")
+    return ("max_completion_tokens" if lowered.startswith(modern_families)
+            else "max_tokens")
+
+
+def _uses_modern_completion_controls(model: str) -> bool:
+    lowered = model.lower()
+    return lowered.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
 def complete(*, model: str, system: str, prompt: str, key_env: str,
              base_url: str | None = None, allow_custom: bool = False,
              max_tokens: int = 4096, timeout: float = 120.0) -> Reply:
@@ -23,11 +44,16 @@ def complete(*, model: str, system: str, prompt: str, key_env: str,
                  allow_insecure_localhost=True)
     payload = {
         "model": model,
-        "temperature": 0,
-        "max_tokens": max_tokens,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": prompt}],
     }
+    # GPT-5 and o-series models only accept their default temperature. Omitting
+    # the field preserves that default; legacy chat models retain deterministic
+    # temperature=0 behaviour.
+    if not _uses_modern_completion_controls(model):
+        payload["temperature"] = 0
+    payload[_completion_token_parameter(
+        model, builtin_openai=origin == BUILTIN_ORIGIN)] = max_tokens
     headers = {"authorization": f"Bearer {read_key(key_env)}"}
     data, rid = request_json(url, payload, headers, timeout=timeout)
     try:

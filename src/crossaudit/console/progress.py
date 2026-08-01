@@ -22,6 +22,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 
 @dataclass
@@ -61,6 +62,18 @@ class Tracker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._run: Run | None = None
+        self._listeners: list[Callable[[], None]] = []
+
+    def subscribe(self, listener: Callable[[], None]) -> None:
+        """Wake a view when progress changes; the ledger remains the record."""
+        with self._lock:
+            self._listeners.append(listener)
+
+    def _changed(self) -> None:
+        with self._lock:
+            listeners = tuple(self._listeners)
+        for listener in listeners:
+            listener()
 
     @property
     def running(self) -> bool:
@@ -72,12 +85,15 @@ class Tracker:
             if self._run is not None and not self._run.finished:
                 raise RuntimeError("a build is already running in this project")
             self._run = Run(task=task)
-            return self._run
+            run = self._run
+        self._changed()
+        return run
 
     def step(self, actor: str, text: str, detail: str = "") -> None:
         with self._lock:
             if self._run is not None:
                 self._run.steps.append(Step(time.time(), actor, text, detail))
+        self._changed()
 
     def finish(self, outcome: str, error: str = "") -> None:
         with self._lock:
@@ -86,6 +102,7 @@ class Tracker:
                 self._run.outcome = outcome
                 self._run.error = error
                 self._run.steps.append(Step(time.time(), "done", outcome, error))
+        self._changed()
 
     def snapshot(self) -> dict | None:
         with self._lock:
@@ -94,6 +111,7 @@ class Tracker:
     def clear(self) -> None:
         with self._lock:
             self._run = None
+        self._changed()
 
 
 #: One tracker per process. The console is a single-project window, and a build

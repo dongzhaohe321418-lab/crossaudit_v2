@@ -89,6 +89,40 @@ def _state(cfg: Config) -> StateStore:
     return StateStore(cfg.root / cfg.state_dir / "state.json")
 
 
+def _is_scaffold_template(path: str) -> bool:
+    return "TEMPLATE" in Path(path).parts
+
+
+def _materialise_tree_scope(cfg: Config, sha: str,
+                            explicit_scope: str | None
+                            ) -> tuple[dict[str, bytes], list[str], str]:
+    """Read the explicit scope, or every configured science scope, from git."""
+    prefixes = [explicit_scope] if explicit_scope else (cfg.scope_dirs or [""])
+    files: dict[str, bytes] = {}
+    notes: list[str] = []
+    for prefix in prefixes:
+        scoped, scoped_notes = materialise(cfg.root, sha, prefix)
+        files.update(scoped)
+        notes.extend(scoped_notes)
+    files = {p: data for p, data in files.items() if not _is_scaffold_template(p)}
+    notes = [n for n in notes
+             if not _is_scaffold_template(n.partition(": ")[2])]
+    scope_text = ", ".join(prefixes) if any(prefixes) else ""
+    return files, notes, scope_text
+
+
+def _committed_task(cfg: Config, sha: str) -> str:
+    """Return TASK.md from the audited tree, never from the working directory."""
+    task_files, _notes = materialise(cfg.root, sha, "TASK.md")
+    raw = task_files.get("TASK.md")
+    if raw is None:
+        return ""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ConfigDenial("committed TASK.md is not UTF-8") from exc
+
+
 # ----------------------------------------------------------------- doctor
 def _offer(args, prompt: str) -> bool:
     """In --fix mode on a terminal, ask; otherwise never touch anything."""
@@ -243,19 +277,36 @@ def _render_doctor(checks: list[dict], ok: bool) -> str:
 # ------------------------------------------------------------------ check
 def cmd_check(args: argparse.Namespace) -> int:
     cfg = load()
-    root = Path(args.path or cfg.root).resolve()
+
     if args.sha:
         sha, _tree = resolve(cfg.root, args.sha)
-        files, notes = materialise(cfg.root, sha, args.scope or "")
-        where = f"{sha[:12]} (from the git tree)"
+        files, notes, scope_text = _materialise_tree_scope(cfg, sha, args.scope)
+        scope_text = scope_text or "repository"
+        where = f"{sha[:12]}:{scope_text} (from the git tree)"
     else:
         files, notes = {}, []
-        for p in sorted(root.rglob("*")):
-            if p.is_symlink():
-                raise ConfigDenial(f"refusing to read through a symlink: {p}")
-            if p.is_file():
-                files[str(p.relative_to(root))] = p.read_bytes()
-        where = f"{root} (working tree)"
+        explicit = bool(args.path)
+        if explicit:
+            roots = [(Path(args.path).resolve(), Path(args.path).resolve())]
+        elif cfg.scope_dirs:
+            roots = [(cfg.root / scope, cfg.root) for scope in cfg.scope_dirs]
+        else:
+            roots = [(cfg.root, cfg.root)]
+        excluded = {".git", cfg.state_dir.split("/", 1)[0],
+                    cfg.ledger_dir.split("/", 1)[0]}
+        for root, relative_to in roots:
+            for p in sorted(root.rglob("*")):
+                if p.is_symlink():
+                    raise ConfigDenial(f"refusing to read through a symlink: {p}")
+                if not p.is_file():
+                    continue
+                rel = str(p.relative_to(relative_to))
+                if _is_scaffold_template(rel):
+                    continue
+                if not explicit and Path(rel).parts[0] in excluded:
+                    continue
+                files[rel] = p.read_bytes()
+        where = f"{', '.join(str(root) for root, _ in roots)} (working tree)"
     result = run_checks(files, cfg.checks, notes, cfg.plugins).as_dict()
     human = [f"deterministic layer over {where}",
              f"verdict: {result['verdict']}  ({result['total_hard_failures']} hard failures)"]
@@ -288,7 +339,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     if cycle.get("already_admitted"):
         raise ConfigDenial(f"{sha[:12]} was already admitted; open a new increment")
 
-    files, notes = materialise(cfg.root, sha, args.scope or "")
+    files, notes, scope_text = _materialise_tree_scope(cfg, sha, args.scope)
     const_path = cfg.root / cfg.constitution
     if not const_path.is_file():
         raise ConfigDenial(f"constitution not found: {const_path}")
@@ -300,8 +351,10 @@ def cmd_audit(args: argparse.Namespace) -> int:
             f"{cfg.constitution} is not committed: an audit must cite the commit that "
             f"versioned the rules (I3). Commit it first.")
 
+    task = _committed_task(cfg, sha)
     outcome = run_audit(cfg=cfg, sha=sha, round_=cycle["round"], files=files, notes=notes,
                         constitution=constitution, constitution_commit=const_commit,
+                        task=task,
                         escalation_lock=bool(cycle.get("blocked_by_escalation")),
                         offline=args.offline,
                         allow_custom_endpoint=_allow_custom(args),
@@ -327,8 +380,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
     manifest = {path: __import__("hashlib").sha256(data).hexdigest()
                 for path, data in files.items()}
+    if task:
+        manifest["TASK.md"] = __import__("hashlib").sha256(
+            task.encode("utf-8")).hexdigest()
     receipt = build_receipt(
-        cfg=cfg, subject={"sha": sha, "tree": tree, "scope": args.scope or ""},
+        cfg=cfg, subject={"sha": sha, "tree": tree, "scope": scope_text},
         cycle=cycle, manifest=manifest, constitution_path=cfg.constitution,
         constitution_bytes=const_path.read_bytes(), constitution_commit=const_commit,
         dcl_source_sha256=dcl_source_digest(), prompt_sha256=outcome.prompt_sha256,
@@ -382,7 +438,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         expect_sha=args.expect_sha or receipt["subject"]["sha"], cfg=cfg)
     out = {"verified": True, **evidence, "admitted": False}
     if args.admit:
-        out.update(admit_receipt(receipt, _state(cfg), evidence))
+        out.update(admit_receipt(receipt, _state(cfg), evidence, cfg=cfg))
     human = (f"VERIFIED  receipt {evidence['receipt_digest'][:16]} for "
              f"{evidence['sha'][:12]}"
              + ("\nADMITTED  consumed once; the cycle is closed" if args.admit
@@ -554,8 +610,8 @@ def cmd_amend(args: argparse.Namespace) -> int:
     """Change the rules by saying what should change. Same path as `talk`'s
     amendment lane, reachable directly when the user already knows the lane."""
     from .talk import lane_amendment
-    from ..router import Routing, record
-    from .talk import _routing_path
+    from ..router import Routing
+    from .talk import _record_routing
 
     cfg = load()
     text = " ".join(args.words).strip()
@@ -564,7 +620,7 @@ def cmd_amend(args: argparse.Namespace) -> int:
     routing = Routing(utterance=text, lane="amendment", confidence=1.0,
                       reasoning="named explicitly by the user", restated=text)
     executed = lane_amendment(cfg, routing, assume_yes=args.yes)
-    record(_routing_path(cfg), routing, executed)
+    _record_routing(cfg, routing, executed)
     return EXIT_OK
 
 
@@ -578,7 +634,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
 # ------------------------------------------------------------------- init
 def cmd_init(args: argparse.Namespace) -> int:
     summary = wizard.run(Path(args.path or "."), mode="github" if args.github else "local",
-                         force=args.force)
+                         force=args.force,
+                         auditor_vendor=getattr(args, "auditor_vendor", None),
+                         auditor_model=getattr(args, "auditor_model", None),
+                         generator_vendor=getattr(args, "generator_vendor", None),
+                         generator_model=getattr(args, "generator_model", None))
 
     # Finish by opening the console, because the setup ends exactly where the
     # work begins and asking someone to find the next command themselves is a
@@ -762,8 +822,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     total = 2 if offline else 3
     _step(1, total, "deterministic checks")
     files, notes = materialise(cfg.root, sha, "", only=science)
+    task = _committed_task(cfg, sha)
     outcome = run_audit(cfg=cfg, sha=sha, round_=cycle["round"], files=files, notes=notes,
                         constitution=const_text, constitution_commit=const_commit,
+                        task=task,
                         offline=offline,
                         allow_custom_endpoint=_allow_custom(args),
                         retention="sealed")
@@ -800,6 +862,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     report_commit = git("rev-parse", "HEAD", cwd=cfg.root)
     manifest = {p_: __import__("hashlib").sha256(b).hexdigest()
                 for p_, b in files.items()}
+    if task:
+        manifest["TASK.md"] = __import__("hashlib").sha256(
+            task.encode("utf-8")).hexdigest()
     receipt = build_receipt(
         cfg=cfg, subject={"sha": sha, "tree": tree, "scope": "changed-paths"},
         cycle=cycle, manifest=manifest, constitution_path=cfg.constitution,
@@ -867,6 +932,15 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--force", action="store_true", help="overwrite an existing config")
     i.add_argument("--no-console", action="store_true",
                    help="do not start or open the console when setup finishes")
+    i.add_argument("--auditor-vendor", choices=tuple(wizard.VENDORS),
+                   help="auditor vendor; useful when stdin is not a terminal")
+    i.add_argument("--auditor-model",
+                   help="exact auditor model id; accepts models newer than this release")
+    i.add_argument("--generator-vendor",
+                   choices=("anthropic", "openai", "google", "deepseek", "human"),
+                   help="generator vendor; must differ from the auditor")
+    i.add_argument("--generator-model",
+                   help="exact generator model id; accepts models newer than this release")
     i.set_defaults(func=cmd_init)
 
     r = sub.add_parser("run", help="audit your latest commit; everything else is automatic")

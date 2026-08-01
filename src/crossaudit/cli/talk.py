@@ -45,6 +45,21 @@ def _routing_path(cfg: Config) -> Path:
     return cfg.root / cfg.ledger_dir / ROUTING_LOG
 
 
+def _record_routing(cfg: Config, routing, executed: str) -> Path:
+    """Append and commit one routing decision without touching staged user work."""
+    path = router_mod.record(_routing_path(cfg), routing, executed)
+    try:
+        relative = str(path.relative_to(cfg.root))
+    except ValueError as exc:
+        raise ConfigDenial(f"routing ledger escaped the project: {path}") from exc
+    git("add", "--", relative, cwd=cfg.root)
+    # A path-limited commit leaves anything the user had already staged alone.
+    git("commit", "-q", "--only", "-m",
+        f"route: {routing.lane} — {routing.utterance[:56]}", "--", relative,
+        cwd=cfg.root)
+    return path
+
+
 def _context(cfg: Config) -> str:
     """What the router needs to judge a sentence: the rules and the loop's state."""
     bits = []
@@ -247,7 +262,7 @@ def cmd_talk(args) -> int:
                                        "standards it is judged by?")
         print(f"\n  Not confident enough to act. {question}")
         print("  Say it again with that settled, and it will go through.")
-        router_mod.record(_routing_path(cfg), routing, "asked for clarification")
+        _record_routing(cfg, routing, "asked for clarification")
         return 0
 
     lane_fns = {
@@ -261,9 +276,9 @@ def cmd_talk(args) -> int:
     try:
         executed = lane_fns[routing.lane]()
     except Denial as exc:
-        router_mod.record(_routing_path(cfg), routing, f"denied: {exc.reason}")
+        _record_routing(cfg, routing, f"denied: {exc.reason}")
         raise
-    router_mod.record(_routing_path(cfg), routing, executed)
+    _record_routing(cfg, routing, executed)
     return 0
 
 

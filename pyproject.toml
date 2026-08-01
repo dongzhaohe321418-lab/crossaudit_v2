@@ -7,16 +7,16 @@
 # package. Everything interactive lives behind `crossaudit init` / `talk`.
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "crossaudit"
-version = "2.7.4"
+version = "2.8.0"
 description = "Cross-vendor AI supervision: one conversation, two adversarial agents, one replayable ledger"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
 authors = [
   { name = "Zhaohe Dong", email = "zd314@cam.ac.uk" },
   { name = "Yuhao Chen", email = "ychen2546@wisc.edu" },
@@ -26,7 +26,6 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3.10",
 ]
 # The whole runtime dependency budget. Model access is stdlib urllib.

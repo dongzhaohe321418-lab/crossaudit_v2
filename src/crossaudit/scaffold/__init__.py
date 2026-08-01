@@ -32,8 +32,8 @@ auditor:
 {base_url_line}
 generator:
   # Declared so I1 (heterogeneity) can be asserted from configuration.
-  # CrossAudit does not drive your generator; it audits what the generator committed.
   vendor: {generator_vendor}
+{generator_details}
 
 isolation:
   # Refuse to admit a receipt whose isolation evidence is weaker than this.
@@ -46,6 +46,10 @@ isolation:
 
 state:
   dir: {state_dir}
+
+scope:
+  # The generator and the default deterministic check may only read/write here.
+  dirs: [experiments]
 
 checks: [schema, units, convergence, provenance]
 """

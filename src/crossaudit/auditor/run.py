@@ -97,12 +97,13 @@ def render_report(*, cfg: Config, sha: str, round_: int, verdict: str, dcl: dict
 
 def run_audit(*, cfg: Config, sha: str, round_: int, files: Mapping[str, bytes],
               notes: list[str], constitution: str, constitution_commit: str,
+              task: str = "",
               escalation_lock: bool = False, offline: bool = False,
               allow_custom_endpoint: bool = False, retention: str = "sealed"
               ) -> AuditOutcome:
     dcl = run_checks(files, cfg.checks, notes, cfg.plugins).as_dict()
-    prompt, bounded, prompt_sha = prompt_mod.build(constitution, constitution_commit,
-                                                   dcl, files)
+    prompt, bounded, prompt_sha = prompt_mod.build(
+        constitution, constitution_commit, dcl, files, task)
     reply: dict | None = None
     invalid: str | None = None
     integrity = "OK"

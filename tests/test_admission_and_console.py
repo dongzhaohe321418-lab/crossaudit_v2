@@ -227,5 +227,40 @@ def test_the_state_endpoint_reports_key_presence_never_the_key(console, monkeypa
     assert "tier" in data and "shortfalls" in data["tier"]
 
 
+def test_live_stream_pushes_progress_without_waiting_for_the_poll(console,
+                                                                  monkeypatch):
+    """Same-process progress is event-driven; a long fallback interval must not
+    delay what the browser sees."""
+    import time
+
+    from crossaudit.console import server as server_mod
+    from crossaudit.console.progress import TRACKER
+
+    TRACKER.clear()
+    monkeypatch.setattr(server_mod, "STREAM_POLL_S", 5.0)
+    stream_url = console.replace("/?t=", "/api/stream?t=")
+    with urllib.request.urlopen(stream_url, timeout=5) as response:
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.readline().startswith(b"data: ")
+        assert response.readline() == b"\n"
+
+        started = time.monotonic()
+        TRACKER.start("show this immediately")
+        pushed = response.readline()
+        latency = time.monotonic() - started
+
+    TRACKER.finish("passed")
+    TRACKER.clear()
+    assert pushed.startswith(b"data: ")
+    assert b"show this immediately" in pushed
+    assert latency < 1.0, f"live update took {latency:.3f}s"
+
+
+def test_external_process_fallback_is_subsecond():
+    from crossaudit.console import server as server_mod
+
+    assert server_mod.STREAM_POLL_S <= 0.1
+
+
 def test_the_console_binds_to_loopback_only(console):
     assert console.startswith("http://127.0.0.1:")

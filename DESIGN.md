@@ -274,6 +274,31 @@ unilateral control. In v2 the wizard does all of it; the user only experiences
 
 ---
 
+## 6.3 控制台形态 · The console shape
+
+**中文** — 执行端是**主窗**(项目在那里成形),审计端是**副窗**(判断是更小更密
+的东西,是读的不是看的),两窗之间是循环状态,底部是**唯一的输入框**——那就是
+黑箱本身。用户按平常习惯打字,路由器决定这句话归哪一侧,**判定与置信度就显示在
+它发生的地方**:分拣不可见的箱子,是在索取它还没挣到的信任。
+
+用户自己的话会出现在**听见它的那一侧窗口**里:说给工作的进左窗,说给标准的进
+右窗。这就是"黑箱可读"的具体含义——你看得见谁听见了你,以及它有多确定。
+
+两个窗口都不是聊天记录:存在的只有 commit、报告、回执、路由记录,控制台把它们
+读回成两条流,不为显示而额外存储任何东西。
+
+**EN** — The generator is the main window (that is where the project takes
+shape), the auditor the side window (judgement is smaller and denser: you read
+it rather than watch it), the loop's state sits between them, and the single
+input at the bottom is the black box. The routing decision and its confidence
+appear where it happened. The user's own words show up in whichever window heard
+them. Neither window is a chat log: commits, reports, receipts and routing
+records are read back into two streams, and nothing is stored for the console's
+benefit.
+
+写入路径只有一条,而且很窄:`/api/say` 只收一句话,交给 `talk` 用的同一个路由器。
+**控制台能引发的一切,CLI 本来就能做**——这是监督台铁规矩的延续。
+
 ## 7. 分层 · Layering
 
 ```

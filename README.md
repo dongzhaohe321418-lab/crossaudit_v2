@@ -100,6 +100,24 @@ A skill shapes how the generator works, never what it may touch or who judges
 it. The auditor never sees them; the path guard, not the text, decides where the
 generator may write; and their hashes go into the receipt.
 
+## 浏览器里的黑箱 The box, in a browser
+
+```bash
+crossaudit console
+```
+
+**执行端主窗 · 审计端副窗 · 底部一个输入框**。你像对任何 AI 一样打字,程序决定
+这句话该给谁——"把主题改成储能成本"去左窗(执行端整轮开工),"以后审计重点放在
+来源版本上"去右窗(起草修宪并提交)。判定与置信度就显示在输入框上方,你自己的话
+也会出现在**听见它的那一侧**。
+
+Two windows — the generator's work on the left, the auditor's judgement on the
+right — and one input at the bottom. Type as you would to any assistant; the box
+decides which side hears it, and shows you the decision and how sure it was.
+
+回环绑定、每个请求要 token、Host 校验、无 cookie、严格 CSP、密钥只报有无。
+唯一的写入路径就是那个输入框,而它能引发的一切,CLI 本来就能做。
+
 ## 打开箱子 Opening the box
 
 外壳不透明是为了好用;内胆是玻璃做的:

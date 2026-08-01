@@ -180,11 +180,42 @@ def test_a_foreign_host_header_is_refused_even_with_the_token(console):
     assert e.value.code == 403
 
 
-def test_the_console_has_no_write_path(console):
+def test_the_only_write_path_is_the_one_input(console):
+    """The console gained exactly one write path — the sentence box — and it is
+    narrow on purpose: everything it can cause, the CLI could already do."""
     req = urllib.request.Request(console, data=b"{}", method="POST")
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=5)
-    assert e.value.code == 405
+    assert e.value.code == 404                      # POST anywhere else: no route
+
+
+def test_the_input_needs_the_token_like_everything_else(console):
+    bare = console.split("?")[0] + "api/say"
+    req = urllib.request.Request(bare, data=b'{"text":"hello"}', method="POST",
+                                 headers={"content-type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=5)
+    assert e.value.code == 403
+
+
+def test_the_input_refuses_an_empty_or_oversized_sentence(console):
+    url = console.replace("/?t=", "/api/say?t=")
+    for payload, code in ((b'{"text":"   "}', 400),
+                          (b'{"text":"' + b"x" * 5000 + b'"}', 413)):
+        req = urllib.request.Request(url, data=payload, method="POST",
+                                     headers={"content-type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req, timeout=5)
+        assert e.value.code == code
+
+
+def test_the_two_windows_are_reconstructed_from_the_ledger(console):
+    _s, body, _h = fetch(console.replace("/?", "/api/state?"))
+    data = json.loads(body)
+    # Two streams, not a stored chat: what exists is commits, reports and receipts.
+    assert "generator_stream" in data and "auditor_stream" in data
+    assert isinstance(data["generator_stream"], list)
+    assert data["generator"] and data["auditor"]
 
 
 def test_the_state_endpoint_reports_key_presence_never_the_key(console, monkeypatch):

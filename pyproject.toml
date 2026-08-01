@@ -1,0 +1,55 @@
+# CrossAudit v2 — one conversation, two adversarial agents, one replayable ledger.
+#
+# No PyPI account yet, so distribution is GitHub-direct:
+#   pip install "crossaudit @ git+https://github.com/dongzhaohe321418-lab/crossaudit_v2@main"
+#
+# Installing has no side effects: no network, no auth, no writes outside the
+# package. Everything interactive lives behind `crossaudit init` / `talk`.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crossaudit"
+version = "2.0.0a1"
+description = "Cross-vendor AI supervision: one conversation, two adversarial agents, one replayable ledger"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Zhaohe Dong", email = "zd314@cam.ac.uk" },
+  { name = "Yuhao Chen", email = "ychen2546@wisc.edu" },
+]
+keywords = ["ai supervision", "auditing", "agents", "provenance", "research integrity"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+]
+# The whole runtime dependency budget. Model access is stdlib urllib.
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+crossaudit = "crossaudit.cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/dongzhaohe321418-lab/crossaudit_v2"
+Protocol = "https://github.com/dongzhaohe321418-lab/crossaudit"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"crossaudit.scaffold" = ["templates/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

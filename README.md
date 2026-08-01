@@ -1,0 +1,133 @@
+# CrossAudit v2
+
+**一个对话面,两个互相制衡的 agent,一本可回放的账。**
+**One conversation, two adversarial agents, one replayable ledger.**
+
+你用平常的话说需求。程序把每句话分拣给执行端、审计端或账本,两个来自不同厂商
+的模型互相盯着干活,整条监督史落进 git——出了问题能追到是谁、什么时候、按哪
+一版规则。
+
+You speak plainly. The program sorts each sentence to the generator, the
+auditor, or the ledger; two models from different vendors keep each other
+honest; and the whole supervision history lands in git, so when something goes
+wrong you can say who, when, and under which version of the rules.
+
+> 设计核心见 **[DESIGN.md](DESIGN.md)**(中英对照)。协议本身与其论文在
+> [crossaudit](https://github.com/dongzhaohe321418-lab/crossaudit)(v1,研究记录)。
+> The design core is **[DESIGN.md](DESIGN.md)**; the protocol and its paper live
+> in v1.
+
+## 安装 Install
+
+```bash
+pip install "crossaudit @ git+https://github.com/dongzhaohe321418-lab/crossaudit_v2@main"
+```
+
+装完什么也不会发生——不联网、不认证、不写任何东西。所有交互都在 `init` 之后。
+Installing does nothing: no network, no auth, no writes. Everything interactive
+lives behind `init`.
+
+## 三分钟上手 Three minutes
+
+```bash
+mkdir my-project && cd my-project && git init
+crossaudit init
+```
+
+向导问四件事:谁审计、谁生成(两家必须不同,否则拒绝)、两个 API key、
+**以及你的项目是什么、你最怕出什么错**。最后一问是关键:你说人话,系统把它
+蒸馏成编号的审计规则,展示给你看,你点头才落盘。**你从头到尾不用写 markdown。**
+
+The wizard asks four things: who audits, who generates (must be different
+vendors, or it refuses), the two API keys, **and what your project is and what
+you are most afraid of getting wrong**. That last answer is distilled into
+numbered rules, shown to you, and committed only if you agree. You never write
+markdown.
+
+然后就只有一个动作——说话:
+
+```bash
+crossaudit talk "以后严查每个数字的来源"      # → 改标准,起草修宪,确认后提交
+crossaudit talk "第三节太啰嗦了,压缩一下"     # → 改内容,交给执行端
+crossaudit talk "现在怎么样了"                # → 只读查询,从账本回答
+crossaudit talk "那次拦错了"                  # → 争议,按规则 ID 一次性申辩
+```
+
+程序自己判断这句话属于哪条车道。**拿不准就问,绝不猜。**
+
+The program decides the lane. **When unsure it asks; it never guesses.**
+
+## 打开箱子 Opening the box
+
+外壳不透明是为了好用;内胆是玻璃做的:
+
+```bash
+crossaudit routing     # 每一次路由决定:原话、车道、置信度、实际执行了什么
+crossaudit watch       # 执行端与审计端的往来对话,从账本重建
+crossaudit status      # 每个周期的状态
+crossaudit verify <receipt>   # 逐项重新推导回执的每个绑定
+```
+
+路由决定本身也入账——否则路由器就成了第三个不受审计的 agent。
+The routing decision is itself a ledger entry; otherwise the router would be a
+third, unaudited agent.
+
+## 引擎动词 Engine verbs
+
+对话面之下是 v1 的引擎,照旧可以直接用:
+
+```bash
+crossaudit run       # 审计最新提交:确定性检查 → 模型审计 → 报告 + 回执
+crossaudit check     # 只跑确定性检查层,不碰任何模型
+crossaudit amend "…" # 直接修宪(等于 talk 的 amendment 车道)
+crossaudit resolve <cycle> --reopen --because "…"   # 人类裁决升级
+crossaudit doctor --fix                              # 体检并逐条指路
+```
+
+退出码是契约:`0` 好结果 · `10` BLOCKED · `11` 升级或仅确定性层 ·
+`20` 配置/环境 · `21` 回执完整性 · `22` provider。所有命令支持 `--json`。
+
+Exit codes are contract; every command supports `--json`.
+
+## 不只是科研 Not only for research
+
+八条不变量没有一条提到"科学"。**产出能落成文件、标准能说得成规则**,就能跑:
+代码、合同审查、财务模型、文案、数据管道。领域相关的只有确定性检查包(可插拔)
+和规则内容(由你的话生成)。没有现成检查包的领域,确定性层贡献为零、模型审计
+独自扛——这一点程序会明说,不含糊。
+
+None of the invariants mentions science. If the output can be a file and the
+standards can be stated as rules, it runs. Where no domain check pack exists,
+the deterministic layer contributes nothing and the model audit carries the load
+alone — the program says so rather than glossing over it.
+
+## 为什么必须 git Why git is mandatory
+
+追责的四个要件都由 commit 提供:审的是什么(SHA + tree 哈希)、审后有没有被改
+(回执 manifest 重推导)、谁和何时(作者链)、报告与回执孰先孰后(提交顺序)。
+所以审计只审**已提交内容**,永不审工作区。v2 里 commit 是箱内动作——执行端
+自己提交,你不必碰 git。
+
+分析用本地仓就够;**追责需要历史脱离单方控制**(本地历史你自己能 rebase 掉),
+GitHub 只是最方便的实现。再上一级是双仓 + 权限分离——那不是为了科研,是为了
+让两个 agent 之间也能互相追责。
+
+Accountability needs all four: what was audited, whether it changed afterwards,
+who and when, and the ordering of report and receipt. Local git suffices for
+analysis; accountability needs the history out of unilateral control; and the
+paired-repository tier exists for privilege separation between the two agents.
+
+## 状态 Status
+
+`2.0.0a1`. 已落地:对话式宪法蒸馏、路由器(五车道 + 低置信度反问 + 决定入账)、
+`talk`/`amend`/`routing`,以及 v1 的完整引擎(确定性层、回执 v2 自指认、
+单次准入、升级裁决)。未落地:执行端 agent 自动干活(a3)、双仓向导自动化(a4)。
+路线图见 [DESIGN.md §8](DESIGN.md)。
+
+Landed: spoken-rule distillation, the router, `talk`/`amend`/`routing`, and v1's
+full engine. Not yet: the generator agent acting on its own (a3), paired-repo
+automation (a4).
+
+## 许可 License
+
+[MIT](LICENSE) © 2026 Zhaohe Dong, Yuhao Chen

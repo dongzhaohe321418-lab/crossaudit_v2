@@ -1,0 +1,285 @@
+# CrossAudit v2 — 设计核心 · Design Core
+
+> 一个对话面,两个互相制衡的 agent,一本可回放的账。
+> One conversation, two adversarial agents, one replayable ledger.
+
+**状态 Status**: v2 设计冻结 2026-08-01,实现进行中。本文件是项目的核心文档;
+与它冲突的任何说明以本文件为准,除非本文件被注日期的修订取代。
+（Design frozen 2026-08-01, implementation under way. This file is the project's
+core document; where anything disagrees with it, this wins, unless superseded by
+a dated amendment here.）
+
+---
+
+## 0. 一句话 · In one line
+
+**中文** — v1 证明了协议成立:让另一家厂商的模型审计你的 AI 产出,把整条监督
+史写进 git。v2 要证明协议**可用**:把这条环收进一个黑箱,用户只对着一个对话面
+说人话,程序自己决定这句话该给执行端、审计端还是账本。
+
+**EN** — v1 established that the protocol works: have a different vendor's model
+audit your AI's output, and write the whole supervision history into git. v2
+establishes that it is *usable*: the loop goes inside a box, the user speaks
+plainly to one conversational surface, and the program decides whether a given
+sentence belongs to the generator, to the auditor, or to the ledger.
+
+---
+
+## 1. 为什么要 v2 · Why v2 exists
+
+**中文** — v1 交付了一个正确但陡峭的东西。要用起来,用户必须先理解"增量"
+"宪法""回执""周期"这套世界观,还要手写一份 markdown 规则书,再学会一串命令。
+对协议研究者这是恰当的;对普通开发者这是一堵墙。v2 的判断是:**把"写规则"
+这个动作从产品里删掉,只留下"说要求"和"点头"**。规则不再是用户的义务,而是
+系统的产出。
+
+**EN** — v1 shipped something correct and steep. To use it you first had to
+absorb a worldview (increments, Constitution, receipts, cycles), hand-write a
+markdown rulebook, and learn a command surface. Right for protocol researchers,
+a wall for everyone else. v2's judgement: **delete the act of "writing rules"
+from the product, leaving only "stating requirements" and "nodding"**. The
+rulebook stops being the user's obligation and becomes the system's output.
+
+---
+
+## 2. 产品形态 · The product shape
+
+```
+                ┌──────────────────────────────────────────┐
+   用户说话 ──▶ │  Router 路由器(程序自己,决定入账)        │
+   user speaks  │    ├─ 项目是什么      ──▶ 两端各自建档     │
+                │    ├─ "太啰嗦,压缩"   ──▶ 执行端 generator │
+                │    ├─ "严查数据来源"  ──▶ 审计端 amendment │
+                │    ├─ "那次拦错了"    ──▶ 争议 dispute      │
+                │    └─ "现在怎么样了"  ──▶ 只读查询 query    │
+                │                                          │
+                │    generator ⇄ auditor  (loop 自转)       │
+                │            └── ledger 账本(照记不误)      │
+                └──────────────────────────────────────────┘
+   用户看到 ──▶  "在写了…审计拦了一处来源问题…已修复…完成"
+```
+
+**中文** — 外面看是一个 AI,里面跑的是两个互相制衡的 agent 加一本账。用户按
+平常语言习惯说话,**分拣这件事的认知负担从用户头上移到程序头上**——这就是
+"黑箱"的全部含义。
+
+**EN** — From outside it is one AI; inside are two agents that check each other
+and a ledger. The user speaks as they normally would, and **the cognitive
+burden of sorting is moved off the user and onto the program** — that is the
+entire meaning of "black box" here.
+
+---
+
+## 3. 三条不可让步的柱子 · Three non-negotiable pillars
+
+### P1 — 黑箱是交互的,不是记录的
+**Opaque to interact with, glass on the inside.**
+
+**中文** — 外壳不透明,内胆全是玻璃。每句话被路由到哪条车道、执行端每次修订、
+审计端每次拦截、路由器每一个判断,全部落账。用户**不必**打开看,但**随时能**
+打开看。信任来自"可打开",好用来自"不必打开"。
+
+推论(硬性):**路由决定本身必须入账**。否则路由器就成了第三个不受审计的
+agent——一个能悄悄决定"这句话不给审计端看"的东西,正是这个协议存在的理由所要
+防范的。
+
+**EN** — Every routing decision, every generator revision, every auditor
+finding is committed. The user *need not* look inside, and *can always* look
+inside. Trust comes from "can open"; usability comes from "need not open".
+Corollary, hard: **the routing decision is itself a ledger entry**. Otherwise
+the router becomes a third, unaudited agent — one that could quietly decide
+what the auditor never sees.
+
+### P2 — 隔离在箱内保持
+**Isolation survives the box.**
+
+**中文** — 主事者(用户)对两端说话都合法:他本来就是规则作者和任务下达者。
+必须继续挡住的只有一条红线:**执行端的内部叙事(它的 prompt、它的推理、它的
+自辩)不得流向审计端**。路由器转发的是**用户的话**,不是执行端的话。审计端永远
+只看已提交的工件。这条是自偏好偏差的入口,写死在实现里。
+
+**EN** — The principal may address both ends; they author the rules and set the
+task. One red line remains: **the generator's internal narrative — its prompts,
+its reasoning, its self-justification — never reaches the auditor.** The router
+forwards *the user's* words, never the generator's. The auditor sees committed
+artefacts and nothing else.
+
+### P3 — 对话是入口,账本是形态
+**Conversation is the input; the ledger is the form.**
+
+**中文** — 用户说的话是易逝的;系统把它蒸馏成结构化规则、展示、用户点头、
+落盘成带 commit 哈希的宪法。审计永远按**落盘的那一版**执行,修订只在周期之间
+生效。v1 的教训(I2:只活在模型上下文里的状态事后不可复原)在 v2 里以产品形态
+被兑现:**ephemeral 的话进来,versioned 的法出去**。
+
+**EN** — Spoken requirements are ephemeral. The system distils them into
+structured rules, shows them, waits for a nod, and commits them as a
+version-pinned Constitution. Audits always run against the committed version,
+and amendments take effect only between cycles.
+
+---
+
+## 4. 路由器 · The Router
+
+### 4.1 车道 · Lanes
+
+| 车道 Lane | 触发 What it looks like | 落成什么 Materialises as |
+|---|---|---|
+| `project` | "这是一个 X 项目,我怕 Y" | 执行端任务书 + 审计端宪法底稿(各自落盘) |
+| `generator` | "太啰嗦了""补一节关于 Z""这段重写" | 执行端修订指令 → 新增量 commit |
+| `amendment` | "以后严查数据来源""这条太严,放宽" | 宪法修订草案 → 确认 → 下一周期生效 |
+| `dispute` | "那次拦错了""这个 finding 不成立" | 按 rule ID 的一次性争议,带论据,入账 |
+| `resolve` | "算了,这个就这样吧""放行" | 人类对升级的裁决(I6 的另一半) |
+| `query` | "现在怎么样了""为什么被拦" | 只读,从账本回答,不产生任何变更 |
+
+**中文** — 分类由**审计端模型**执行(它对规则的理解最相关),但分类结果本身
+是数据,不是命令:落成 `routing.jsonl` 的一条记录,含原话、判定车道、置信度、
+以及最终执行的动作。分错了在账本里看得见、可回溯。
+
+**EN** — Classification runs on the auditor-side model, but its output is data,
+not command: one line in `routing.jsonl` carrying the utterance, the chosen
+lane, the confidence, and what was actually executed. A misroute is visible and
+reversible in the ledger.
+
+### 4.2 低置信度的处理 · When the router is unsure
+
+**中文** — fail-closed 的产品版:**拿不准就问,绝不猜**。置信度低于阈值时,
+黑箱短暂地不黑——"这句我理解成 A(改内容)还是 B(改标准)?"一句话确认。
+这比猜错便宜得多:猜错方向的修订会污染宪法或产出。
+
+**EN** — The fail-closed default, in product form: **when unsure, ask; never
+guess.** Below the confidence threshold the box briefly becomes transparent —
+one clarifying question. Cheaper than a wrong guess, which would contaminate
+either the rulebook or the work.
+
+### 4.3 角色自动分配 · Automatic role assignment
+
+**中文** — 两个 key 在手,系统自动分配谁审谁写,顺手满足 I1(异质性)。默认
+规则:两家不同厂商时任意指派并记录;用户一句话可改("让 GPT 来审")。**同厂
+配对直接拒绝**——那是同源监督,是这个协议存在的理由所要防范的东西。
+
+**EN** — With two keys present the system assigns roles and satisfies I1 by
+construction. Same-vendor pairs are refused outright: that is same-source
+supervision, the thing the protocol exists to prevent.
+
+---
+
+## 5. 通用性 · Domain generality
+
+**中文** — 八条不变量通篇没有一个字提"科学"。v2 明确面向**任何"产出能落成
+文件、标准能说成规则"的工作**:代码、合同审查、财务模型、文案、数据管道、
+法律意见。
+
+领域相关的只有两处,都是可换件:
+
+1. **确定性检查包**(DCL)——v1 内置的四个检查(schema/units/convergence/
+   provenance)假设了实验数据格式。v2 的默认检查包是**领域中立**的(文件存在、
+   声明完整、内部引用一致、产出可解析),领域检查靠 `crossaudit.checks`
+   entry-point 分发。没有现成检查包的领域,DCL 贡献为零,模型审计独自扛——
+   **loop 照转,但 I4 的机械保障退化,这一点必须对用户说明,不能含糊。**
+2. **宪法内容**——由第 3 节的对话蒸馏产生,天然就是那个领域的规则。
+
+**适用边界只有一条**:产出必须能落成文件,标准必须能说成规则。
+
+**EN** — None of I1–I8 mentions science. v2 targets any work whose output can
+be a file and whose standards can be stated as rules. Only two things are
+domain-bound and both are swappable: the deterministic check pack (default pack
+is domain-neutral; domain packs ship as plugins — and where no pack exists the
+DCL contributes nothing, the model audit carries the load alone, and I4's
+mechanical guarantee degrades, which must be **said**, not glossed), and the
+Constitution's content, which the conversation produces anyway.
+
+---
+
+## 6. 为什么必须 git,以及"云端"到底要什么
+## Why git is mandatory, and what "cloud" is actually for
+
+### 6.1 追责的四要件都由 commit 提供
+
+| 要件 Requirement | git 提供 What git gives |
+|---|---|
+| 审的到底是什么 | commit SHA + tree 哈希,内容寻址,赖不掉 |
+| 审完有没有被改 | 回执 manifest 对树重推导 |
+| 谁、什么时候 | 作者链 + 时间戳 |
+| 先有报告还是先有回执 | 提交顺序;回执绑定报告的 commit |
+
+**中文** — 所以审计只审**已提交的内容**,永不审工作区。git 就是那个"数据库",
+不需要另建。关键的 v2 差异:**commit 是箱内动作**——执行端写完自己提交,用户
+从头到尾不必碰 git,就像用数据库的人不必手写 WAL。
+
+**EN** — The audit reads the commit, never the working tree. In v2 committing
+happens *inside* the box: the generator commits its own work, and the user
+never touches git.
+
+### 6.2 "必须云端"的精确表述
+
+**中文** — 分析只需本地 git;**追责需要历史脱离单方控制**——因为本地历史你
+自己能 rebase 掉。GitHub 是最方便的实现,不是唯一实现(任何你无法单方改写的
+远端都行)。分级如下,每一级只声称自己够得着的东西:
+
+| 级 Tier | 机制 Mechanism | 能追谁的责 What it can hold to account |
+|---|---|---|
+| 本地单仓 local | 只有自己的历史 | 只能自省,防不了自己 |
+| 远端托管 remote | 历史脱离单方控制 | 能对自己追责(篡改可证) |
+| **双仓 + 权限分离 paired** | 执行端碰不到规则与报告;审计端碰不到工作记录 | **能在两个 agent 之间追责——这才是双仓存在的理由** |
+| App 绑定 + 保护分支 enforced | 独立持久 controller 原子消费回执 | 能对"绕过审计的合并"追责 |
+
+**中文** — 所以:**双仓不是为了科研,是为了权限分离;云端不是为了云,是为了
+让历史逃出单方控制。** 这些在 v2 里全部沉到箱底,由向导自动完成,用户只感觉到
+"这个 AI 说的话都有据可查"。
+
+**EN** — Two repositories are not about science, they are about privilege
+separation; the cloud is not about the cloud, it is about history escaping
+unilateral control. In v2 the wizard does all of it; the user only experiences
+"everything this AI told me is checkable."
+
+---
+
+## 7. 分层 · Layering
+
+```
+┌───────────────────────────────────────────────┐
+│ 对话黑箱 Conversation box                     │  ← 用户唯一接触面
+│   router · narrator · confirmation            │     the only surface
+├───────────────────────────────────────────────┤
+│ 两个 agent Two agents                          │  ← 自动分配角色
+│   generator (writes) │ auditor (judges)       │
+├───────────────────────────────────────────────┤
+│ CrossAudit 引擎 Engine (v1, 已建成 built)      │  ← 不变量在这里执行
+│   loop · DCL · receipts · controller · ledger │     invariants enforced here
+└───────────────────────────────────────────────┘
+```
+
+**中文** — v1 的 CLI(`run`/`verify`/`resolve`/`amend`)降为引擎层接口,继续
+存在、继续可单独使用;对话黑箱是产品表面。**引擎层不为黑箱放松任何一条不变量**
+——黑箱不能做引擎不允许的事,这是 v1 已经为 UI 定下的铁规矩的延伸。
+
+**EN** — v1's CLI becomes the engine interface, still present and still usable
+on its own; the conversation box is the product surface. **The engine relaxes
+nothing for the box**: the box cannot do what the CLI could not.
+
+---
+
+## 8. 里程碑 · Milestones
+
+| 版本 | 交付 Delivers | 完成判据 Done when |
+|---|---|---|
+| **v2.0.0-a1** | 对话式 `init`(宪法蒸馏)、`amend`(一句话修宪)、路由器骨架 + `routing.jsonl` | 用户从未写过 markdown,宪法已落盘并被回执引用 |
+| a2 | `talk`:单一对话面,五条车道全通,低置信度反问 | 一次会话内完成"改内容 / 改标准 / 争议"三类操作,全部入账 |
+| a3 | 执行端 agent 接入:黑箱内自动 commit、自动重审直至 PASS 或升级 | 用户只说需求,产出与账本自己长出来 |
+| a4 | 领域中立 DCL + 检查包插件;双仓向导自动化 | 非科研项目全流程跑通;paired 档位可用 |
+| 2.0 | 稳定 schema/API;浏览器只读控制台 | 独立安全复核 + 真实部署证据 |
+
+---
+
+## 9. 与 v1 的关系 · Relationship to v1
+
+**中文** — v1 仓库([crossaudit](https://github.com/dongzhaohe321418-lab/crossaudit))
+保持不动:它承载 position paper、注册的消融实验、六轮审计史——那是**研究记录**,
+不追产品。v2 是**产品线**,引擎移植自 v1 并继续演进。两边通过引擎的不变量语义
+保持一致;协议层面的权威文本仍是 v1 的论文。
+
+**EN** — The v1 repository stays put: it carries the position paper, the
+registered ablation, and six rounds of audit history — that is the research
+record and it does not chase the product. v2 is the product line. The
+protocol's authoritative text remains v1's paper.

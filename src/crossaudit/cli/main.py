@@ -634,7 +634,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
 # ------------------------------------------------------------------- init
 def cmd_init(args: argparse.Namespace) -> int:
     summary = wizard.run(Path(args.path or "."), mode="github" if args.github else "local",
-                         force=args.force)
+                         force=args.force,
+                         auditor_vendor=getattr(args, "auditor_vendor", None),
+                         auditor_model=getattr(args, "auditor_model", None),
+                         generator_vendor=getattr(args, "generator_vendor", None),
+                         generator_model=getattr(args, "generator_model", None))
 
     # Finish by opening the console, because the setup ends exactly where the
     # work begins and asking someone to find the next command themselves is a
@@ -928,6 +932,15 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--force", action="store_true", help="overwrite an existing config")
     i.add_argument("--no-console", action="store_true",
                    help="do not start or open the console when setup finishes")
+    i.add_argument("--auditor-vendor", choices=tuple(wizard.VENDORS),
+                   help="auditor vendor; useful when stdin is not a terminal")
+    i.add_argument("--auditor-model",
+                   help="exact auditor model id; accepts models newer than this release")
+    i.add_argument("--generator-vendor",
+                   choices=("anthropic", "openai", "google", "deepseek", "human"),
+                   help="generator vendor; must differ from the auditor")
+    i.add_argument("--generator-model",
+                   help="exact generator model id; accepts models newer than this release")
     i.set_defaults(func=cmd_init)
 
     r = sub.add_parser("run", help="audit your latest commit; everything else is automatic")

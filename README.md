@@ -124,6 +124,18 @@ The wizard asks four things, arrow keys to choose:
 | **3. Two keys** | **visible as you type**, so a typo or a truncated paste is visible too; written to `~/.crossaudit-keys.env` (mode 600), **never into the repository**. `CROSSAUDIT_HIDE_KEYS=1` hides them |
 | **4. What this is, and what would be a mistake** | you say it in plain language; the system distils it into numbered rules, **shows them, and commits them only if you agree** |
 
+The bundled first-party choices currently include OpenAI's GPT-5.6 family and
+Anthropic's Claude Fable 5, Opus 4.8, Sonnet 4.6 and Haiku 4.5. Every model menu
+also has **something else** for a future or account-specific id. In a pipe, CI,
+or another non-terminal launcher, select explicitly instead of relying on arrow
+keys:
+
+```bash
+crossaudit init my-project \
+  --auditor-vendor openai --auditor-model gpt-5.6-terra \
+  --generator-vendor anthropic --generator-model claude-sonnet-4-6
+```
+
 The fourth question is the important one:
 
 ```
@@ -339,7 +351,7 @@ support.
 
 | Command | What it does |
 |---|---|
-| `crossaudit init [name]` | create the directory, `git init`, run the wizard, draft the rules from what you say |
+| `crossaudit init [name]` | create the directory, `git init`, run the wizard, draft the rules; model/vendor flags work without a TTY |
 | `crossaudit doctor` | preflight and the real admission tier; `--online` probes GitHub |
 | `crossaudit build "…"` | say what to build; the loop writes and audits it |
 | `crossaudit talk "…"` | talk to the box; it routes to one of six lanes |
@@ -393,6 +405,7 @@ support.
 | `$… is not set in this process, though …keys.env has it` | the key is stored but this process started before it was. `source ~/.crossaudit-keys.env`, or restart the console with `crossaudit console --stop && crossaudit console` |
 | `certificate verify failed: unable to get local issuer certificate` | this Python's trust store is empty. `pip install certifi`, or on a python.org build run `/Applications/Python 3.x/Install Certificates.command`. `crossaudit doctor` reports it as **tls trust store** before you ever call a model |
 | `HTTP 400 — it said: model: …` | the model id, not your key: this account cannot use it. Edit `model:` in `crossaudit.yml`, or re-run `crossaudit init` and pick from the list |
+| `Unsupported parameter: 'max_tokens'` | an outdated OpenAI adapter used a retired field. Fixed in 2.8.0: built-in OpenAI requests use `max_completion_tokens`; reinstall this version and retry |
 | `HTTP 401 — it said: …` | the key was rejected. `crossaudit doctor` prints its length and last four characters — enough to spot a truncated paste or a key for the other vendor |
 | `HTTP 429` | the vendor's rate limit or an empty balance, not a CrossAudit limit |
 | a console you cannot reach and cannot stop | fixed in 2.7.4; a console started by an earlier version deadlocked on SIGTERM and deleted its own run record. Find it with `lsof -iTCP -sTCP:LISTEN -P \| grep python` and `kill -9` the pid |
@@ -445,7 +458,7 @@ Three principles run through all of it:
 
 ## Status
 
-`2.8.0`, 257 tests. Landed: spoken-rule distillation, the six-lane router, the
+`2.8.0`, 262 tests. Landed: spoken-rule distillation, the six-lane router, the
 closed `build` loop, the one-shot dispute channel, domain-neutral checks,
 allowlisted check-pack plugins, the paired-repository wizard, evidence-based
 admission tiering, committed task requirements, modern OpenAI/Anthropic model

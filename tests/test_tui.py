@@ -116,6 +116,33 @@ def test_model_ids_look_like_model_ids():
             assert hint, f"{vendor}: {mid} has no explanation"
 
 
+def test_current_first_party_models_are_the_setup_defaults():
+    assert wizard.VENDORS["openai"][1] == "gpt-5.6-terra"
+    assert [m for m, _ in wizard.VENDOR_MODELS["openai"]] == [
+        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+    assert wizard.VENDORS["anthropic"][1] == "claude-sonnet-4-6"
+    assert [m for m, _ in wizard.VENDOR_MODELS["anthropic"]] == [
+        "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001"]
+
+
+def test_init_flags_make_models_selectable_without_a_terminal(tmp_path, monkeypatch):
+    target = tmp_path / "flagged"
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(tmp_path / "keys.env"))
+
+    wizard.run(
+        target, mode="local", auditor_vendor="openai",
+        auditor_model="gpt-future-preview", generator_vendor="anthropic",
+        generator_model="claude-future-preview")
+
+    from crossaudit.config import load
+    cfg = load(target / "crossaudit.yml")
+    assert cfg.auditor.vendor == "openai"
+    assert cfg.auditor.model == "gpt-future-preview"
+    assert cfg.generator_vendor == "anthropic"
+    assert cfg.generator_model == "claude-future-preview"
+
+
 def test_confirm_honours_its_default_without_stdin(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     assert tui.confirm("go?", default=True) is True
@@ -650,6 +677,8 @@ def test_the_shapes_vendors_actually_send_for_a_bad_model(said):
     "messages: at least one message is required",
     "invalid x-api-key",
     "max_tokens: must be greater than 0",
+    ("Unsupported parameter: 'max_tokens' is not supported with this model. "
+     "Use 'max_completion_tokens' instead."),
     ("Unsupported value: 'temperature' does not support 0 with this model. "
      "Only the default (1) value is supported."),
 ])
@@ -659,13 +688,16 @@ def test_other_four_hundreds_are_not_blamed_on_the_model(said):
     assert not _looks_like_a_model_problem(said)
 
 
-@pytest.mark.parametrize("model,expected,absent,has_temperature", [
-    ("gpt-5-mini", "max_completion_tokens", "max_tokens", False),
-    ("o4-mini", "max_completion_tokens", "max_tokens", False),
-    ("gpt-4.1-mini", "max_tokens", "max_completion_tokens", True),
+@pytest.mark.parametrize("model,base_url,expected,absent,has_temperature", [
+    ("gpt-5.6-terra", None, "max_completion_tokens", "max_tokens", False),
+    ("gpt-4.1-mini", None, "max_completion_tokens", "max_tokens", True),
+    ("gpt-5-mini", "http://127.0.0.1:9999", "max_completion_tokens",
+     "max_tokens", False),
+    ("gpt-4.1-mini", "http://127.0.0.1:9999", "max_tokens",
+     "max_completion_tokens", True),
 ])
 def test_openai_token_limit_parameter_matches_the_model_family(
-        model, expected, absent, has_temperature, monkeypatch):
+        model, base_url, expected, absent, has_temperature, monkeypatch):
     from crossaudit.providers import openai_compat
 
     captured = {}
@@ -683,6 +715,8 @@ def test_openai_token_limit_parameter_matches_the_model_family(
         prompt="prompt",
         key_env="CROSSAUDIT_TEST_KEY",
         max_tokens=17,
+        base_url=base_url,
+        allow_custom=bool(base_url),
     )
 
     assert captured[expected] == 17
@@ -693,9 +727,10 @@ def test_openai_token_limit_parameter_matches_the_model_family(
 
 
 @pytest.mark.parametrize("model,has_temperature", [
-    ("claude-sonnet-5", False),
-    ("claude-opus-5", False),
-    ("claude-sonnet-4-5-20250929", True),
+    ("claude-fable-5", False),
+    ("claude-opus-4-8", True),
+    ("claude-sonnet-4-6", True),
+    ("claude-haiku-4-5-20251001", True),
 ])
 def test_anthropic_temperature_matches_the_model_generation(
         model, has_temperature, monkeypatch):
@@ -736,7 +771,7 @@ def test_anthropic_custom_loopback_needs_explicit_opt_in(monkeypatch):
             {"content": [{"type": "text", "text": "OK"}]}, "request-id"),
     )
     kwargs = {
-        "model": "claude-sonnet-5",
+        "model": "claude-sonnet-4-6",
         "system": "system",
         "prompt": "prompt",
         "key_env": "CROSSAUDIT_TEST_KEY",

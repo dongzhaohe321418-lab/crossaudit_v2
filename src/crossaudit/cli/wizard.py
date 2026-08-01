@@ -29,8 +29,8 @@ from . import tui
 DEFAULT_KEYS_FILE = Path.home() / ".crossaudit-keys.env"
 
 VENDORS = {
-    "anthropic": ("anthropic", "claude-sonnet-4-5", "https://api.anthropic.com"),
-    "openai": ("openai_compat", "gpt-5.1", "https://api.openai.com"),
+    "anthropic": ("anthropic", "claude-sonnet-4-6", "https://api.anthropic.com"),
+    "openai": ("openai_compat", "gpt-5.6-terra", "https://api.openai.com"),
     "google": ("openai_compat", "gemini-2.5-pro",
                "https://generativelanguage.googleapis.com/v1beta/openai"),
     "deepseek": ("openai_compat", "deepseek-chat", "https://api.deepseek.com"),
@@ -47,15 +47,15 @@ VENDOR_HINTS = {
 #: goes stale the week after a release.
 VENDOR_MODELS = {
     "anthropic": [
-        ("claude-opus-5", "most capable"),
-        ("claude-sonnet-5", "balanced"),
-        ("claude-sonnet-4-5", "previous generation"),
+        ("claude-fable-5", "most capable generally available"),
+        ("claude-opus-4-8", "high capability"),
+        ("claude-sonnet-4-6", "balanced"),
         ("claude-haiku-4-5-20251001", "fastest, cheapest"),
     ],
     "openai": [
-        ("gpt-5.1", "most capable"),
-        ("gpt-5", "previous generation"),
-        ("gpt-5-mini", "faster, cheaper"),
+        ("gpt-5.6-sol", "highest capability"),
+        ("gpt-5.6-terra", "balanced"),
+        ("gpt-5.6-luna", "fastest, lowest cost"),
     ],
     "google": [
         ("gemini-2.5-pro", "most capable"),
@@ -265,8 +265,12 @@ def _distil(description: str, provider: str, model: str, base_url: str):
     return const_mod.distil(description, complete=complete)
 
 
-def run(target: Path, *, mode: str, force: bool = False) -> dict:
+def run(target: Path, *, mode: str, force: bool = False,
+        auditor_vendor: str | None = None, auditor_model: str | None = None,
+        generator_vendor: str | None = None,
+        generator_model: str | None = None) -> dict:
     """Guided setup. Returns a summary of what was written."""
+    requested_generator_model = generator_model
     target = target.resolve()
     cfg_path = target / CONFIG_NAME
     if cfg_path.exists() and not force:
@@ -284,11 +288,13 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
     # ---- 1. the auditor ----------------------------------------------------
     tui.step(1, 4, "Who audits")
     tui.note("The model that reviews everything before it counts as done.")
-    auditor_vendor = tui.select(
+    auditor_vendor = auditor_vendor or tui.select(
         "Auditor vendor:",
         [tui.Option(v, v, VENDOR_HINTS[v]) for v in VENDORS], default=0)
+    if auditor_vendor not in VENDORS:
+        raise ConfigDenial(f"unknown auditor vendor {auditor_vendor!r}")
     provider, default_model, _url = VENDORS[auditor_vendor]
-    model = choose_model(auditor_vendor, default_model)
+    model = auditor_model or choose_model(auditor_vendor, default_model)
     base_url = ""
     if auditor_vendor == "other":
         base_url = tui.text("OpenAI-compatible base URL",
@@ -300,22 +306,25 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
     tui.note("The model that writes each build round. Its vendor is also recorded "
              "so same-source supervision can be refused before either key is used.")
     others = [v for v in VENDORS if v not in (auditor_vendor, "other")]
-    generator_vendor = tui.select(
+    generator_vendor = generator_vendor or tui.select(
         "Generator vendor:",
         [tui.Option(v, v, VENDOR_HINTS[v]) for v in others]
         + [tui.Option("human", "human", "you write it yourself")], default=0)
-    if generator_vendor.lower() == auditor_vendor.lower():
+    if generator_vendor == auditor_vendor:
         raise ConfigDenial(
             f"auditor and generator are both {auditor_vendor!r}: that is "
             f"same-source supervision, which is the thing this protocol exists "
             f"to avoid")
+    if generator_vendor not in (*others, "human"):
+        raise ConfigDenial(f"unknown or unsupported generator vendor "
+                           f"{generator_vendor!r}")
     generator_provider = ""
     generator_model = ""
     if generator_vendor != "human":
         generator_provider, generator_default_model, _generator_url = VENDORS[
             generator_vendor]
-        generator_model = choose_model(generator_vendor, generator_default_model,
-                                       role="Generator")
+        generator_model = requested_generator_model or choose_model(
+            generator_vendor, generator_default_model, role="Generator")
 
     # ---- 3. keys -----------------------------------------------------------
     tui.step(3, 4, "API keys")

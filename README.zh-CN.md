@@ -119,9 +119,9 @@ crossaudit init my-project
 
 | 问 | 说明 |
 |---|---|
-| **1. 谁审计** | 选厂商与模型 |
+| **1. 谁审计** | 先选厂商,再从列表里选模型 |
 | **2. 谁生成** | **必须和审计端不同**,选一样会被当场拒绝——那是同源监督,正是本协议要防的 |
-| **3. 两个 key** | 隐藏输入,写进 `~/.crossaudit-keys.env`(权限 600),**永不进仓库** |
+| **3. 两个 key** | **输入时可见**,好让你看见有没有输错;写进 `~/.crossaudit-keys.env`(权限 600),**永不进仓库**。`CROSSAUDIT_HIDE_KEYS=1` 可隐藏 |
 | **4. 项目是什么、最怕出什么错** | 你说人话,系统蒸馏成编号规则,**展示给你看,点头才落盘** |
 
 第四问是关键:
@@ -348,6 +348,7 @@ agent 之间**追责。
 | `CROSSAUDIT_GENERATOR_PROVIDER` | 执行端 provider(默认按厂商推断) |
 | `CROSSAUDIT_GENERATOR_BASE_URL` | 执行端自定义 endpoint |
 | `CROSSAUDIT_KEYS_FILE` | 改密钥文件位置(沙箱用) |
+| `CROSSAUDIT_HIDE_KEYS` | 输入密钥时隐藏;默认可见,好让你看见有没有输错 |
 | `CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT` | 允许非内置 origin——**会把密钥发去那里**,所以必须显式开 |
 
 </details>

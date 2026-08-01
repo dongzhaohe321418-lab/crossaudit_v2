@@ -53,6 +53,69 @@ def test_secret_never_guesses_a_credential(monkeypatch):
     assert tui.secret("key") == ""
 
 
+# ------------------------------------------------------------ credentials
+def test_a_key_is_visible_as_you_type_by_default(monkeypatch, capsys):
+    """Hiding it makes a typo or a truncated paste invisible until the first API
+    call fails — and that failure names the vendor, not the mistake."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.delenv("CROSSAUDIT_HIDE_KEYS", raising=False)
+    monkeypatch.setattr("builtins.input", lambda _p: "sk-ant-visible-9f2a")
+    assert tui.secret("auditor key") == "sk-ant-visible-9f2a"
+    assert "34 chars" not in capsys.readouterr().out    # fingerprint, not a lie
+
+
+def test_the_fingerprint_lets_you_check_without_repeating_the_secret():
+    fp = tui.fingerprint("sk-ant-api03-something-long-9f2a")
+    assert "32 chars" in fp and fp.endswith("9f2a")
+    assert "api03" not in fp                            # the middle never reappears
+    assert tui.fingerprint("") == "empty"
+    assert tui.fingerprint("short") == "5 chars, ending …"
+
+
+def test_hiding_is_available_for_a_shared_screen(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("CROSSAUDIT_HIDE_KEYS", "1")
+    called = {}
+
+    def fake_getpass(prompt):
+        called["hidden"] = True
+        return "sk-hidden"
+
+    monkeypatch.setattr("getpass.getpass", fake_getpass)
+    assert tui.secret("key") == "sk-hidden" and called["hidden"]
+
+
+# ------------------------------------------------------------ model choice
+def test_every_vendor_offers_models_and_a_way_to_type_one(monkeypatch):
+    """A wizard that only offers what it knew when it shipped goes stale the
+    week after a release."""
+    monkeypatch.setattr(tui, "interactive", lambda: False)
+    for vendor, known in wizard.VENDOR_MODELS.items():
+        if vendor == "other":
+            continue
+        assert known, f"{vendor} offers no models"
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        assert wizard.choose_model(vendor, "fallback") == known[0][0]
+
+
+def test_an_unknown_vendor_falls_back_to_typing_the_id(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    assert wizard.choose_model("other", "my-model") == "my-model"
+
+
+def test_the_type_it_option_leads_to_a_text_prompt(monkeypatch):
+    monkeypatch.setattr(tui, "select", lambda *a, **k: wizard.TYPE_IT)
+    monkeypatch.setattr(tui, "text", lambda *a, **k: "some-new-model")
+    assert wizard.choose_model("anthropic", "d") == "some-new-model"
+
+
+def test_model_ids_look_like_model_ids():
+    for vendor, models in wizard.VENDOR_MODELS.items():
+        for mid, hint in models:
+            assert " " not in mid, f"{vendor}: {mid!r} has a space"
+            assert hint, f"{vendor}: {mid} has no explanation"
+
+
 def test_confirm_honours_its_default_without_stdin(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     assert tui.confirm("go?", default=True) is True

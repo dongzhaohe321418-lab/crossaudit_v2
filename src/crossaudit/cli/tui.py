@@ -247,13 +247,42 @@ def text(prompt: str, default: str = "", *, placeholder: str = "") -> str:
     return got or default
 
 
-def secret(prompt: str) -> str:
-    """Hidden input. Never echoed, never defaulted to something guessable."""
+def fingerprint(value: str) -> str:
+    """A credential described without being repeated: length and its last four.
+
+    Enough to tell a truncated paste from a whole one, or the wrong key from the
+    right one, without putting the secret back on screen a second time.
+    """
+    if not value:
+        return "empty"
+    tail = value[-4:] if len(value) > 8 else "…"
+    return f"{len(value)} chars, ending {tail}"
+
+
+def secret(prompt: str, *, hide: bool | None = None) -> str:
+    """Ask for a credential.
+
+    Visible by default. Hiding it means a typo or a truncated paste is invisible
+    until the first API call fails, and that failure names the vendor rather than
+    the mistake — so the common error is silent and the rare shoulder-surfer is
+    the one who has to opt in, through CROSSAUDIT_HIDE_KEYS.
+    """
     if not sys.stdin.isatty():
         return ""
-    import getpass
+    if hide is None:
+        hide = bool(os.environ.get("CROSSAUDIT_HIDE_KEYS"))
+    if hide:
+        import getpass
 
-    return getpass.getpass(f"  {prompt}\n  ❯ ").strip()
+        value = getpass.getpass(f"  {prompt}\n  ❯ ").strip()
+    else:
+        try:
+            value = input(f"  {prompt}\n  {green('❯')} ").strip()
+        except EOFError:
+            return ""
+    if value:
+        print(dim(f"    got {fingerprint(value)}"))
+    return value
 
 
 def confirm(question: str, *, default: bool = True) -> bool:

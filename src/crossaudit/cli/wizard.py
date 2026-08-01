@@ -39,6 +39,53 @@ VENDOR_HINTS = {
     "anthropic": "Claude", "openai": "GPT", "google": "Gemini",
     "deepseek": "DeepSeek", "other": "any OpenAI-compatible endpoint",
 }
+
+#: Models offered per vendor, most capable first. A list is not a promise that
+#: every entry is available on your account — the last option always lets you
+#: type an id, because a wizard that only offers what it knew when it shipped
+#: goes stale the week after a release.
+VENDOR_MODELS = {
+    "anthropic": [
+        ("claude-opus-5", "most capable"),
+        ("claude-sonnet-5", "balanced"),
+        ("claude-sonnet-4-5", "previous generation"),
+        ("claude-haiku-4-5-20251001", "fastest, cheapest"),
+    ],
+    "openai": [
+        ("gpt-5.1", "most capable"),
+        ("gpt-5", "previous generation"),
+        ("gpt-5-mini", "faster, cheaper"),
+    ],
+    "google": [
+        ("gemini-2.5-pro", "most capable"),
+        ("gemini-2.5-flash", "faster, cheaper"),
+    ],
+    "deepseek": [
+        ("deepseek-reasoner", "reasoning"),
+        ("deepseek-chat", "general"),
+    ],
+    "other": [],
+}
+TYPE_IT = "__type__"
+
+
+def choose_model(vendor: str, default: str) -> str:
+    """Pick a model from a list, or type one.
+
+    Typing an exact model id from memory is the step people get wrong, and a
+    wrong id fails much later with a provider error that says nothing about the
+    wizard. Offer the ones we know and keep the escape hatch.
+    """
+    known = VENDOR_MODELS.get(vendor) or []
+    if not known:
+        return tui.text("Model id", default, placeholder="exactly as the vendor spells it")
+    options = [tui.Option(m, m, hint) for m, hint in known]
+    options.append(tui.Option(TYPE_IT, "something else", "type the id yourself"))
+    picked = tui.select("Auditor model:", options, default=0)
+    if picked == TYPE_IT:
+        return tui.text("Model id", default,
+                        placeholder="exactly as the vendor spells it")
+    return picked
 # Kept for callers and tests that predate the arrow-key flow.
 VENDOR_PRESETS = VENDORS
 
@@ -148,7 +195,7 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
         "Auditor vendor:",
         [tui.Option(v, v, VENDOR_HINTS[v]) for v in VENDORS], default=0)
     provider, default_model, _url = VENDORS[auditor_vendor]
-    model = tui.text("Auditor model", default_model)
+    model = choose_model(auditor_vendor, default_model)
     base_url = ""
     if auditor_vendor == "other":
         base_url = tui.text("OpenAI-compatible base URL",
@@ -172,8 +219,10 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
 
     # ---- 3. keys -----------------------------------------------------------
     tui.step(3, 4, "API keys")
-    tui.note(f"Hidden as you type, written to {keys_file()} with mode 600, never "
-             f"placed in the repository. Leave blank to export them yourself.")
+    tui.note(f"Written to {keys_file()} with mode 600, never placed in the "
+             f"repository. Leave blank to export them yourself.")
+    tui.note("Shown as you type so you can see a mistake — set CROSSAUDIT_HIDE_KEYS=1 "
+             "if someone is looking over your shoulder.")
     auditor_key = tui.secret(f"{auditor_vendor} key — the auditor")
     generator_key = ""
     if generator_vendor != "human":

@@ -119,9 +119,9 @@ The wizard asks four things, arrow keys to choose:
 
 | Question | What it does |
 |---|---|
-| **1. Who audits** | pick the vendor and model that reviews |
+| **1. Who audits** | pick the vendor, then the model, both from a list |
 | **2. Who generates** | **must differ from the auditor** — choosing the same one is refused outright, because that is same-source supervision, the thing this protocol exists to prevent |
-| **3. Two keys** | hidden as you type, written to `~/.crossaudit-keys.env` (mode 600), **never into the repository** |
+| **3. Two keys** | **visible as you type**, so a typo or a truncated paste is visible too; written to `~/.crossaudit-keys.env` (mode 600), **never into the repository**. `CROSSAUDIT_HIDE_KEYS=1` hides them |
 | **4. What this is, and what would be a mistake** | you say it in plain language; the system distils it into numbered rules, **shows them, and commits them only if you agree** |
 
 The fourth question is the important one:
@@ -366,6 +366,7 @@ support.
 | `CROSSAUDIT_GENERATOR_PROVIDER` | the generator's provider (inferred from the vendor by default) |
 | `CROSSAUDIT_GENERATOR_BASE_URL` | a custom endpoint for the generator |
 | `CROSSAUDIT_KEYS_FILE` | where credentials are stored (useful for sandboxes) |
+| `CROSSAUDIT_HIDE_KEYS` | hide keys as you type; visible by default so a typo is visible too |
 | `CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT` | permit a non-builtin origin — **this sends your key there**, so it must be explicit |
 
 </details>

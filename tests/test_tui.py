@@ -165,3 +165,21 @@ def test_the_readme_exit_codes_match_the_contract():
     for code in (errors.EXIT_OK, errors.EXIT_BLOCKED, errors.EXIT_ESCALATED,
                  errors.EXIT_CONFIG, errors.EXIT_INTEGRITY, errors.EXIT_PROVIDER):
         assert f"`{code}`" in readme, f"exit code {code} is not in the README table"
+
+
+def test_the_readme_is_english_and_the_translation_is_linked():
+    """The primary README is the one GitHub shows first; a translation that
+    nobody can find from it is a translation nobody reads."""
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "README.md").read_text()
+    body = "\n".join(line for line in readme.splitlines()
+                     if "README.zh-CN" not in line and "中文" not in line)
+    cjk = sum(1 for ch in body if "一" <= ch <= "鿿")
+    assert cjk == 0, f"{cjk} CJK characters outside the translation link"
+    assert "README.zh-CN.md" in readme
+    assert (root / "README.zh-CN.md").is_file()
+
+
+def test_the_translation_points_back_at_the_english_one():
+    root = Path(__file__).resolve().parents[1]
+    assert "README.md" in (root / "README.zh-CN.md").read_text()

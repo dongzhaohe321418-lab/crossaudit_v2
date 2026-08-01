@@ -95,6 +95,48 @@ def keys_file() -> Path:
     return Path(os.environ.get("CROSSAUDIT_KEYS_FILE", DEFAULT_KEYS_FILE)).expanduser()
 
 
+def read_keys_file(path: Path | None = None) -> dict[str, str]:
+    """Parse the `export NAME="value"` lines we wrote. Nothing else is executed.
+
+    The file is shell-shaped so a person can `source` it, but reading it here
+    parses rather than runs: a credentials file is the last thing that should be
+    able to execute anything.
+    """
+    path = path or keys_file()
+    out: dict[str, str] = {}
+    if not path.is_file():
+        return out
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line.startswith("export ") or "=" not in line:
+            continue
+        name, _, value = line[len("export "):].partition("=")
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name.startswith("CROSSAUDIT_") and value:
+            out[name] = value
+    return out
+
+
+def load_keys_into_env() -> list[str]:
+    """Make the keys we wrote available to the process that needs them.
+
+    The wizard writes this file and then hands off — to the console it starts, or
+    to the next command. Expecting the person to `source` it in between is a seam
+    that produces a 400 from a provider rather than a sentence about setup, and
+    it is our file: we wrote it, we know where it is, we can read it.
+
+    An exported variable always wins: someone who set a key deliberately in this
+    shell meant that one.
+    """
+    loaded = []
+    for name, value in read_keys_file().items():
+        if not os.environ.get(name):
+            os.environ[name] = value
+            loaded.append(name)
+    return loaded
+
+
 def write_keys(pairs: dict[str, str]) -> Path:
     """Append keys to a 0600 file. Existing values are kept unless replaced."""
     path = keys_file()
@@ -232,6 +274,11 @@ def run(target: Path, *, mode: str, force: bool = False) -> dict:
     if auditor_key or generator_key:
         written = write_keys({"CROSSAUDIT_AUDITOR_KEY": auditor_key,
                               "CROSSAUDIT_GENERATOR_KEY": generator_key})
+        # The keys arrived after main() looked for them, and the console this run
+        # is about to start inherits this environment. Load them now, or the very
+        # first thing the person types into the console fails on a missing key
+        # they just supplied.
+        load_keys_into_env()
         tui.ok(f"keys written to {written} (mode 600)")
 
     # ---- 4. the rules, spoken rather than written --------------------------

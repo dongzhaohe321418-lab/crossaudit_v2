@@ -88,10 +88,22 @@ def request_json(url: str, payload: dict, headers: dict, *, timeout: float = CON
 
 def read_key(env_name: str) -> str:
     key = os.environ.get(env_name, "").strip()
-    if not key:
-        raise ConfigDenial(f"no API key in ${env_name}; export it (never put it in "
-                           f"crossaudit.yml)", env=env_name)
-    return key
+    if key:
+        return key
+    # Say which of the two situations this is. "Export it" is unhelpful advice to
+    # someone who already gave the wizard a key: their problem is that the file
+    # holding it was never loaded here.
+    from ..cli.wizard import keys_file, read_keys_file
+
+    path = keys_file()
+    if env_name in read_keys_file(path):
+        raise ConfigDenial(
+            f"${env_name} is not set in this process, though {path} has it. "
+            f"Load it with `source {path}`, or restart whatever is running so it "
+            f"picks the file up", env=env_name, keys_file=str(path))
+    raise ConfigDenial(
+        f"no API key in ${env_name}. Run `crossaudit init` to store one, or "
+        f"export it yourself — it never goes in crossaudit.yml", env=env_name)
 
 
 def sha256_text(text: str) -> str:

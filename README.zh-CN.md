@@ -70,7 +70,7 @@ lives behind `init`.
 验证:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.0 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.1 (receipt schema 2)
 ```
 
 <details>
@@ -364,6 +364,7 @@ agent 之间**追责。
 | `DENIED (config): no crossaudit.yml found` | 不在项目里,或还没 `crossaudit init` |
 | `I1 violated: auditor vendor 'x' equals generator vendor 'x'` | 两端同厂——这是**故意拒绝**,换一端的厂商 |
 | 裁定是 `DCL_ONLY` | 没有模型审计过。检查 `$CROSSAUDIT_AUDITOR_KEY`,`doctor` 会指出来 |
+| `$… is not set in this process, though …keys.env has it` | 密钥已存,但这个进程启动得更早。`source ~/.crossaudit-keys.env`,或 `crossaudit console --stop && crossaudit console` 重启控制台 |
 | `endpoint … is not this provider's built-in origin` | 用了自定义 base_url,需显式 `--allow-custom-endpoint` |
 | `install mode source/editable may verify but never admit` | 可验证但不可准入——它的代码能在自报摘要后被改。装 wheel 才能准入 |
 | 控制台 403 | token 不对,或 `Host` 不是 localhost。用 `crossaudit console --status` 拿正确 URL |
@@ -405,7 +406,7 @@ pip uninstall crossaudit
 
 ## 状态 · Status
 
-`2.7.0`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
+`2.7.1`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
 争议、领域中立检查包、检查包插件、双仓向导、准入档位自证、实时推送的浏览器面板、
 后台常驻与重连。未落地:enforced 档的实地证据、PyPI 发行。
 

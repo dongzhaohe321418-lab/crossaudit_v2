@@ -944,6 +944,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Load the credentials file we wrote, if the variables are not already set.
+    # Done here rather than at import time: importing this package must stay
+    # free of side effects, and only a command actually needs a key.
+    wizard.load_keys_into_env()
     if not getattr(args, "verb", None):
         # First-run funnel: pip cannot run a wizard at install time (and must
         # not — constraint 7), so the first bare invocation is the doorway.

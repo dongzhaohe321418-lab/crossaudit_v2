@@ -67,7 +67,7 @@ behind `init`.
 Check it:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.0 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.1 (receipt schema 2)
 ```
 
 <details>
@@ -385,6 +385,7 @@ support.
 | `DENIED (config): no crossaudit.yml found` | you are not in a project, or have not run `crossaudit init` |
 | `I1 violated: auditor vendor 'x' equals generator vendor 'x'` | both ends are the same vendor — this refusal is **deliberate**; change one |
 | the verdict is `DCL_ONLY` | no model audited it. Check `$CROSSAUDIT_AUDITOR_KEY`; `doctor` will point at it |
+| `$… is not set in this process, though …keys.env has it` | the key is stored but this process started before it was. `source ~/.crossaudit-keys.env`, or restart the console with `crossaudit console --stop && crossaudit console` |
 | `endpoint … is not this provider's built-in origin` | a custom `base_url` needs an explicit `--allow-custom-endpoint` |
 | `install mode source/editable may verify but never admit` | such an install can change its code after reporting its own digest. Install the wheel to admit |
 | the console returns 403 | wrong token, or `Host` is not localhost. Get the right URL from `crossaudit console --status` |
@@ -434,7 +435,7 @@ Three principles run through all of it:
 
 ## Status
 
-`2.7.0`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
+`2.7.1`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
 closed `build` loop, the one-shot dispute channel, domain-neutral checks,
 allowlisted check-pack plugins, the paired-repository wizard, evidence-based
 admission tiering, a live-pushed browser dashboard, and a console that outlives

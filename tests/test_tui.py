@@ -319,3 +319,75 @@ def test_a_console_that_will_not_start_is_reported_not_raised(tmp_path, capsys):
     out = main_mod._open_console(tmp_path)      # no config here at all
     assert out == {"console": None}
     assert "crossaudit console" in capsys.readouterr().out
+
+
+# ------------------------------------------- credentials reach the process
+def test_the_keys_file_is_parsed_not_executed(tmp_path, monkeypatch):
+    """It is shell-shaped so a person can source it, but a credentials file is
+    the last thing that should be able to run anything."""
+    from crossaudit.cli import wizard as wz
+
+    f = tmp_path / "keys.env"
+    f.write_text('# comment\n'
+                 'export CROSSAUDIT_AUDITOR_KEY="sk-a"\n'
+                 "export CROSSAUDIT_GENERATOR_KEY='sk-b'\n"
+                 'rm -rf /   # not a variable, and not run either\n'
+                 'export SOMETHING_ELSE="ignored"\n')
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(f))
+    assert wz.read_keys_file() == {"CROSSAUDIT_AUDITOR_KEY": "sk-a",
+                                   "CROSSAUDIT_GENERATOR_KEY": "sk-b"}
+
+
+def test_a_key_the_wizard_stored_reaches_the_next_command(tmp_path, monkeypatch):
+    """The seam that produced a 400 from a provider instead of a sentence about
+    setup: the wizard wrote the file and nothing ever read it back."""
+    from crossaudit.cli import wizard as wz
+
+    f = tmp_path / "keys.env"
+    f.write_text('export CROSSAUDIT_AUDITOR_KEY="sk-stored"\n')
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(f))
+    monkeypatch.delenv("CROSSAUDIT_AUDITOR_KEY", raising=False)
+    assert wz.load_keys_into_env() == ["CROSSAUDIT_AUDITOR_KEY"]
+    assert os_environ_key() == "sk-stored"
+
+
+def os_environ_key() -> str:
+    import os
+
+    return os.environ.get("CROSSAUDIT_AUDITOR_KEY", "")
+
+
+def test_an_exported_key_wins_over_the_file(tmp_path, monkeypatch):
+    """Someone who set a key in this shell meant that one."""
+    from crossaudit.cli import wizard as wz
+
+    f = tmp_path / "keys.env"
+    f.write_text('export CROSSAUDIT_AUDITOR_KEY="sk-from-file"\n')
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(f))
+    monkeypatch.setenv("CROSSAUDIT_AUDITOR_KEY", "sk-deliberate")
+    assert wz.load_keys_into_env() == []
+    assert os_environ_key() == "sk-deliberate"
+
+
+def test_a_missing_keys_file_is_not_an_error(tmp_path, monkeypatch):
+    from crossaudit.cli import wizard as wz
+
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(tmp_path / "absent.env"))
+    assert wz.read_keys_file() == {} and wz.load_keys_into_env() == []
+
+
+def test_the_error_says_which_problem_you_have(tmp_path, monkeypatch):
+    """'Export it' is unhelpful to someone who already gave the wizard a key."""
+    from crossaudit.errors import ConfigDenial
+    from crossaudit.providers.base import read_key
+
+    f = tmp_path / "keys.env"
+    monkeypatch.setenv("CROSSAUDIT_KEYS_FILE", str(f))
+    monkeypatch.delenv("CROSSAUDIT_AUDITOR_KEY", raising=False)
+
+    with pytest.raises(ConfigDenial, match="crossaudit init"):
+        read_key("CROSSAUDIT_AUDITOR_KEY")       # never stored one
+
+    f.write_text('export CROSSAUDIT_AUDITOR_KEY="sk-a"\n')
+    with pytest.raises(ConfigDenial, match="not set in this process"):
+        read_key("CROSSAUDIT_AUDITOR_KEY")       # stored, but not loaded here

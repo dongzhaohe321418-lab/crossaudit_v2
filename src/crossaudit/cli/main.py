@@ -379,6 +379,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_build(args: argparse.Namespace) -> int:
+    from .build import cmd_build
+
+    return cmd_build(args)
+
+
 # ------------------------------------------------------------------ amend
 def cmd_amend(args: argparse.Namespace) -> int:
     """Change the rules by saying what should change. Same path as `talk`'s
@@ -703,6 +709,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("watch", help="live view: generator, auditor, and their conversation")
     w.set_defaults(func=cmd_watch)
+
+    b = sub.add_parser("build", help='say what to build; the loop writes and audits it')
+    b.add_argument("words", nargs="*")
+    b.set_defaults(func=_cmd_build)
 
     tk = sub.add_parser("talk", help="say what you want; the program routes it")
     tk.add_argument("words", nargs="+")

@@ -123,11 +123,23 @@ def lane_query(cfg: Config, routing) -> str:
 
 
 def lane_generator(cfg: Config, routing) -> str:
+    """A change to the work goes to the generator, through the same loop `build`
+    runs: write, commit, audit, and repeat on findings."""
+    from .build import cmd_build
+
     print(f"\n  That is a change to the work: {routing.restated}")
-    print("  The generator agent that acts on this arrives in a2 (DESIGN.md §8).")
-    print("  For now: make the change, commit it, and run `crossaudit run` —")
-    print("  the audit half of the loop is live.")
-    return "queued for generator (not yet automated)"
+
+    class _Args:
+        words = routing.restated.split()
+
+    try:
+        code = cmd_build(_Args())
+    except Denial as exc:
+        print(f"  The generator could not run: {exc.reason}")
+        print("  Set CROSSAUDIT_GENERATOR_MODEL and its key, or make the change "
+              "yourself and run `crossaudit run`.")
+        return f"generator unavailable: {exc.reason}"
+    return f"built and audited (exit {code})"
 
 
 def lane_dispute(cfg: Config, routing) -> str:

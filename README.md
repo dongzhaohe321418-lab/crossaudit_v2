@@ -44,7 +44,29 @@ you are most afraid of getting wrong**. That last answer is distilled into
 numbered rules, shown to you, and committed only if you agree. You never write
 markdown.
 
-然后就只有一个动作——说话:
+然后说一句要什么,循环自己转起来:
+
+```bash
+crossaudit build "写一节关于光伏度电成本的内容,数字必须和数据文件一致"
+```
+
+```
+  ── round 1 ──
+  generator  3 file(s): work/lcoe/SUMMARY.md, …
+  auditor    blocked
+             [CA-TXT-001] 正文写 0.052,而数据文件是 0.044
+  loop       findings returned to the generator
+  ── round 2 ──
+  generator  3 file(s)  note: 已按数据修正正文
+  auditor    passed
+  Done in 2 round(s).
+```
+
+执行端写、审计端判、findings 打回去重写,直到通过或交给你。每一轮都是 commit,
+每次裁定都有报告和回执。**Say what you want; the loop writes, audits, and
+revises until it passes or hands it to you.**
+
+其余时候也只有一个动作——说话:
 
 ```bash
 crossaudit talk "以后严查每个数字的来源"      # → 改标准,起草修宪,确认后提交
@@ -119,14 +141,14 @@ paired-repository tier exists for privilege separation between the two agents.
 
 ## 状态 Status
 
-`2.0.0a1`. 已落地:对话式宪法蒸馏、路由器(五车道 + 低置信度反问 + 决定入账)、
-`talk`/`amend`/`routing`,以及 v1 的完整引擎(确定性层、回执 v2 自指认、
-单次准入、升级裁决)。未落地:执行端 agent 自动干活(a3)、双仓向导自动化(a4)。
-路线图见 [DESIGN.md §8](DESIGN.md)。
+`2.0.0a2`. 已落地:对话式宪法蒸馏、路由器(六车道 + 低置信度反问 + 决定入账)、
+`talk`/`amend`/`routing`、**`build` 闭环(执行端自动写、提交、按 findings 重写)**,
+以及 v1 的完整引擎(确定性层、回执 v2 自指认、单次准入、升级裁决)。
+未落地:争议车道、领域检查包插件、双仓向导自动化。路线图见 [DESIGN.md §8](DESIGN.md)。
 
-Landed: spoken-rule distillation, the router, `talk`/`amend`/`routing`, and v1's
-full engine. Not yet: the generator agent acting on its own (a3), paired-repo
-automation (a4).
+Landed: spoken-rule distillation, the router, `talk`/`amend`/`routing`, the
+closed `build` loop, and v1's full engine. Not yet: the dispute channel, domain
+check packs, paired-repo automation.
 
 ## 许可 License
 

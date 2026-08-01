@@ -299,6 +299,28 @@ benefit.
 写入路径只有一条,而且很窄:`/api/say` 只收一句话,交给 `talk` 用的同一个路由器。
 **控制台能引发的一切,CLI 本来就能做**——这是监督台铁规矩的延续。
 
+## 6.4 实时进度 · Live progress
+
+**中文** — 一次 build 要几分钟:生成端写、审计端读、被拦就再来一轮。让浏览器
+干等是错的形状,但流式播报一段账本里没有的叙事同样是错的。**这里的规则是:
+进度是"在飞的工作"的视图,记录仍然是账本。**
+
+因此进度条目**天生短命**:只在内存里、随进程消失、下游没有任何东西读它。进程
+中途死掉,进度就没了,而账本仍然握有每一个已提交的轮次——这个不对称是对的。
+一份活得比运行还久的进度日志就是第二部历史:没版本、没审计,而人们第一件事
+就是去信它。
+
+同一个项目同时只跑一个 build:两个并发会在工作区和轮次预算上打架,诚实的回答
+是"已经有一个在跑了"。CLI 与控制台跑的是**同一个循环函数**,控制台只是观察它
+——第二份实现会在唯一要紧的事情上漂移:什么时候该停。
+
+**EN** — A build takes minutes. Blocking the browser is the wrong shape; so is
+streaming a narrative the ledger does not have. Progress is a view of work in
+flight and the ledger remains the record: entries live in memory, vanish with
+the process, and nothing downstream reads them. One build at a time per project,
+and the CLI and the console drive the *same* loop function rather than two
+copies that could drift on the only thing that matters — when to stop.
+
 ## 7. 分层 · Layering
 
 ```

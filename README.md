@@ -115,6 +115,15 @@ Two windows — the generator's work on the left, the auditor's judgement on the
 right — and one input at the bottom. Type as you would to any assistant; the box
 decides which side hears it, and shows you the decision and how sure it was.
 
+说完就能**看着它干活**:生成端写了哪些文件、审计端拦在哪条规则、findings 打回去
+第几轮、计时多少秒——逐步出现,不用等整轮跑完。进度只在内存里,随进程消失;
+记录始终是账本。
+
+Watch it work: which files the generator wrote, which rule the auditor blocked
+on, which round the findings went back to, and how long it has been running.
+Progress is in memory and vanishes with the process; the record is always the
+ledger.
+
 回环绑定、每个请求要 token、Host 校验、无 cookie、严格 CSP、密钥只报有无。
 唯一的写入路径就是那个输入框,而它能引发的一切,CLI 本来就能做。
 

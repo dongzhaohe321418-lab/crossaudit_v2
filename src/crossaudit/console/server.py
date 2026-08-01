@@ -35,6 +35,7 @@ from ..controller import StateStore
 from ..errors import Denial
 from ..router import history as routing_history
 from .page import PAGE
+from .progress import TRACKER
 from .streams import both
 
 IDLE_TIMEOUT_S = 900.0
@@ -72,7 +73,39 @@ def snapshot(cfg: Config) -> dict:
         "routing": routing_history(cfg.root / cfg.ledger_dir / "routing.jsonl", 40),
         "generator_stream": gen_stream,
         "auditor_stream": aud_stream,
+        # In-flight work, if any. Ephemeral by construction: the ledger is still
+        # the record, and this vanishes with the process.
+        "progress": TRACKER.snapshot(),
     }
+
+
+def start_build(cfg: Config, task: str) -> dict:
+    """Run a build in the background so the browser can watch it happen.
+
+    The loop is the same one the CLI runs — the console watches it, it does not
+    reimplement it, because a second copy could drift on the only thing that
+    matters: when the loop stops.
+    """
+    import threading
+
+    from ..cli.build import preflight, resolve_task, run_loop
+
+    preflight(cfg)
+    resolved = resolve_task(cfg, task.split())
+    run = TRACKER.start(resolved)
+
+    def work() -> None:
+        try:
+            code = run_loop(cfg, resolved,
+                            on_step=lambda a, txt, d="": TRACKER.step(a, txt, d))
+            TRACKER.finish({0: "passed", 11: "escalated"}.get(code, "blocked"))
+        except Denial as exc:
+            TRACKER.finish("refused", exc.reason)
+        except Exception as exc:                                  # noqa: BLE001
+            TRACKER.finish("failed", f"{type(exc).__name__}: {exc}")
+
+    threading.Thread(target=work, daemon=True).start()
+    return {"started": True, "task": resolved.splitlines()[0][:80]}
 
 
 def say(cfg: Config, text: str) -> dict:
@@ -94,10 +127,17 @@ def say(cfg: Config, text: str) -> dict:
                 "reasoning": routing.reasoning,
                 "clarify": routing.clarify or "Is this about the work, or about the "
                                               "standards it is judged by?"}
+    def generator_lane() -> str:
+        if TRACKER.running:
+            return ("a build is already running; watch it above, or wait for it "
+                    "to finish")
+        started = start_build(cfg, routing.restated)
+        return f"building: {started['task']}"
+
     lanes = {
         "amendment": lambda: talk_mod.lane_amendment(cfg, routing, assume_yes=True),
         "query": lambda: talk_mod.lane_query(cfg, routing),
-        "generator": lambda: talk_mod.lane_generator(cfg, routing),
+        "generator": generator_lane,
         "dispute": lambda: talk_mod.lane_dispute(cfg, routing),
         "resolve": lambda: talk_mod.lane_resolve(cfg, routing, assume_yes=True),
         "project": lambda: talk_mod.lane_project(cfg, routing),

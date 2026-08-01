@@ -102,8 +102,116 @@ class _Args:
     allow_custom_endpoint = True
 
 
-def cmd_build(args) -> int:
-    cfg = load()
+def run_loop(cfg, task: str, *, on_step=None) -> int:
+    """The build loop itself. `on_step(actor, text, detail)` narrates it.
+
+    Kept separate from cmd_build so the console can watch the same loop the CLI
+    runs, rather than a reimplementation of it that could drift on the one thing
+    that matters: when the loop stops.
+    """
+    def report(actor: str, text: str, detail: str = "") -> None:
+        if on_step is not None:
+            on_step(actor, text, detail)
+
+    allow_custom = bool(os.environ.get("CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT"))
+    complete = _generator_complete(cfg, allow_custom)
+    constitution = (cfg.root / cfg.constitution).read_text()
+    store = StateStore(cfg.root / cfg.state_dir / "state.json")
+    house = skills_mod.load(cfg.root)
+    findings = ""
+
+    for round_no in range(1, cfg.max_rounds + 1):
+        report("loop", f"round {round_no} of {cfg.max_rounds}")
+        report("generator", "writing")
+        current = _current_work(cfg)
+        in_force = skills_mod.select(house, list(current) or cfg.scope_dirs)
+        try:
+            work = gen_mod.generate(task=task, constitution=constitution,
+                                    current=current, complete=complete,
+                                    findings=findings, allowed_dirs=cfg.scope_dirs,
+                                    skills=skills_mod.render(in_force))
+        except ProviderDenial as exc:
+            # An overreaching or malformed round is a refused round, not a
+            # crashed loop: the generator is told what the guard refused and
+            # gets its next attempt inside the same budget.
+            report("generator", "refused", exc.reason)
+            findings = (f"[BLOCKER] Your last round was refused before it reached "
+                        f"the auditor: {exc.reason}\nReturn only files inside "
+                        f"{', '.join(cfg.scope_dirs)}/ and try again.")
+            if round_no == cfg.max_rounds:
+                break
+            continue
+
+        written = gen_mod.apply(work, cfg.root)
+        report("generator", work.summary, ", ".join(written[:4]))
+        if work.notes:
+            report("generator", "note", work.notes[:200])
+
+        # Dirtiness is judged over what will actually be committed. Asking about
+        # the whole tree lets an untracked file elsewhere fake a change, and then
+        # the commit has nothing staged and fails.
+        git("add", "--", *cfg.scope_dirs, cwd=cfg.root)
+        if not git("diff", "--cached", "--name-only", cwd=cfg.root,
+                   check=False).strip():
+            report("loop", "the round reproduced the previous one; nothing new to "
+                           "audit")
+            break
+        try:
+            git("commit", "-q", "-m", f"{work.summary} (round {round_no})",
+                cwd=cfg.root)
+        except ConfigDenial as exc:
+            # git refusing is a refused round, like any other: the loop reports it
+            # and stops cleanly rather than tearing down a run the ledger already
+            # has rounds for.
+            report("loop", "the round could not be committed", exc.reason[:200])
+            break
+
+        report("auditor", "reviewing the commit")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = cmd_run(_Args())
+        inner = buffer.getvalue()
+        cycles = store.snapshot().get("cycles", {})
+        latest = max(cycles.values(), key=lambda c: c.get("round", 0), default={})
+        status = latest.get("status", "?")
+
+        if code == EXIT_OK:
+            report("auditor", "PASS")
+            return EXIT_OK
+        if status == "ESCALATED":
+            report("auditor", "ESCALATED", "the loop cannot settle this itself")
+            return EXIT_ESCALATED
+        blocking = [ln.strip("- ").strip() for ln in inner.splitlines()
+                    if ln.strip().startswith("- [")]
+        report("auditor", "BLOCKED", "; ".join(blocking[:2])[:300])
+        findings = gen_mod.render_findings(_last_report(cfg))
+        report("loop", "findings returned to the generator")
+
+    report("loop", f"round budget spent ({cfg.max_rounds})")
+    return EXIT_ESCALATED
+
+
+def resolve_task(cfg, words: list[str]) -> str:
+    """The task, from the command line or from the committed TASK.md."""
+    task = " ".join(words).strip()
+    task_path = cfg.root / TASK_FILE
+    if not task:
+        if not task_path.is_file():
+            raise ConfigDenial('say what to build: crossaudit build "..."')
+        return task_path.read_text()
+    # The task joins the ledger too: a reader asking "why does this exist"
+    # should find the answer in the repository, not in someone's terminal.
+    # Restating the same task is not a change, and git has nothing to commit.
+    unchanged = task_path.is_file() and task_path.read_text().strip() == task.strip()
+    task_path.write_text(task + "\n")
+    if not unchanged:
+        git("add", "--", TASK_FILE, cwd=cfg.root)
+        git("commit", "-q", "-m", f"task: {task.splitlines()[0][:68]}", cwd=cfg.root)
+    return task
+
+
+def preflight(cfg) -> None:
+    """What must hold before either caller starts a loop."""
     if not is_repo(cfg.root):
         raise ConfigDenial(f"{cfg.root} is not a git repository; the ledger is git")
     if not cfg.scope_dirs:
@@ -114,107 +222,35 @@ def cmd_build(args) -> int:
     if not het_ok:
         raise ConfigDenial(why)
 
-    task = " ".join(args.words).strip()
-    task_path = cfg.root / TASK_FILE
-    if not task:
-        if not task_path.is_file():
-            raise ConfigDenial('say what to build: crossaudit build "..."')
-        task = task_path.read_text()
-    else:
-        # The task joins the ledger too: a reader asking "why does this exist"
-        # should find the answer in the repository, not in someone's terminal.
-        # Restating the same task is not a change, and git has nothing to commit
-        # for it — re-running a build must not fail on that.
-        unchanged = task_path.is_file() and task_path.read_text().strip() == task.strip()
-        task_path.write_text(task + "\n")
-        if not unchanged:
-            git("add", "--", TASK_FILE, cwd=cfg.root)
-            git("commit", "-q", "-m", f"task: {task.splitlines()[0][:68]}", cwd=cfg.root)
 
-    allow_custom = bool(os.environ.get("CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT"))
-    complete = _generator_complete(cfg, allow_custom)
+def cmd_build(args) -> int:
+    cfg = load()
+    preflight(cfg)
+    task = resolve_task(cfg, args.words)
     constitution = (cfg.root / cfg.constitution).read_text()
-    store = StateStore(cfg.root / cfg.state_dir / "state.json")
+    house = skills_mod.load(cfg.root)
 
     print("\nCrossAudit — building under audit")
     print("=" * 60)
     print(f"  task     {task.splitlines()[0][:60]}")
     print(f"  rules    {cfg.constitution} ({constitution.count(chr(10) + '### ')} rules)")
     print(f"  writing  {', '.join(cfg.scope_dirs)}/")
-    house = skills_mod.load(cfg.root)
     if house:
         print(f"  skills   {', '.join(s.name for s in house)}")
     print(f"  rounds   up to {cfg.max_rounds}, then it goes to you")
 
-    findings = ""
-    for round_no in range(1, cfg.max_rounds + 1):
-        print(f"\n  ── round {round_no} ─────────────────────────────────────")
-        print("  generator  writing…", end="", flush=True)
-        current = _current_work(cfg)
-        in_force = skills_mod.select(house, list(current) or cfg.scope_dirs)
-        try:
-            work = gen_mod.generate(task=task, constitution=constitution,
-                                    current=current, complete=complete,
-                                    findings=findings, allowed_dirs=cfg.scope_dirs,
-                                    skills=skills_mod.render(in_force))
-        except ProviderDenial as exc:
-            # An overreaching or malformed round is a refused round, not a crashed
-            # loop: the generator is told what the guard refused and gets its next
-            # attempt, inside the same budget. Crashing here would make a bounded
-            # revision loop fail open into a human's lap for something it can fix.
-            print(f"\r  generator  refused — {exc.reason[:88]}")
-            findings = (f"[BLOCKER] Your last round was refused before it reached "
-                        f"the auditor: {exc.reason}\nReturn only files inside "
-                        f"{', '.join(cfg.scope_dirs)}/ and try again.")
-            if round_no == cfg.max_rounds:
-                break
-            continue
-        written = gen_mod.apply(work, cfg.root)
-        print(f"\r  generator  {len(written)} file(s): {', '.join(written[:3])}"
-              + (" …" if len(written) > 3 else ""))
-        if work.notes:
-            print(f"             note: {work.notes[:100]}")
+    def on_step(actor: str, text: str, detail: str) -> None:
+        if actor == "loop" and text.startswith("round "):
+            print(f"\n  ── {text} " + "─" * max(0, 44 - len(text)))
+            return
+        line = f"  {actor:10s} {text}"
+        print(line if not detail else f"{line}\n  {'':10s} {detail[:96]}")
 
-        if not git("status", "--porcelain", cwd=cfg.root, check=False).strip():
-            print("  generator  produced no change; nothing further to audit")
-            break
-        git("add", "--", *cfg.scope_dirs, cwd=cfg.root)
-        git("commit", "-q", "-m", f"{work.summary} (round {round_no})", cwd=cfg.root)
-
-        print("  auditor    reviewing…", end="", flush=True)
-        # The inner verb narrates for someone who invoked it directly. Here the
-        # loop is doing the invoking, so its narration is captured and summarised:
-        # a box that leaks its own internals is not a box. The full text is in
-        # the ledger either way, which is where a curious reader should look.
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            code = cmd_run(_Args())
-        inner = buffer.getvalue()
-        cycles = store.snapshot().get("cycles", {})
-        latest = max(cycles.values(), key=lambda c: c.get("round", 0), default={})
-        status = latest.get("status", "?")
-
-        if code == EXIT_OK:
-            print("\r  auditor    passed             ")
-            print(f"\n  Done in {round_no} round(s). The work passed audit and the "
-                  f"ledger has the whole exchange.")
-            print("  Read it:  crossaudit watch      Admit it:  crossaudit verify "
-                  "<receipt> --admit")
-            return EXIT_OK
-        if status == "ESCALATED":
-            print("\r  auditor    escalated          ")
-            print(f"\n  Round {round_no} escalated: the loop cannot settle this itself.")
-            print("  Say what should happen — `crossaudit talk \"...\"` — or read the "
-                  "exchange with `crossaudit watch`.")
-            return EXIT_ESCALATED
-        findings = gen_mod.render_findings(_last_report(cfg))
-        blocking = [ln.strip("- ").strip() for ln in inner.splitlines()
-                    if ln.strip().startswith("- [")]
-        print("\r  auditor    blocked            ")
-        for line in blocking[:3]:
-            print(f"             {line[:96]}")
-        print("  loop       findings returned to the generator")
-
-    print(f"\n  Round budget spent ({cfg.max_rounds}). It is yours now: "
-          f"`crossaudit watch` to read the exchange.")
-    return EXIT_ESCALATED
+    code = run_loop(cfg, task, on_step=on_step)
+    if code == EXIT_OK:
+        print("\n  Done. The work passed audit and the ledger has the whole exchange.")
+        print("  Read it:  crossaudit watch   ·   Watch live:  crossaudit console")
+    else:
+        print("\n  It is yours now: `crossaudit watch` to read the exchange, or say "
+              "what should happen next.")
+    return code

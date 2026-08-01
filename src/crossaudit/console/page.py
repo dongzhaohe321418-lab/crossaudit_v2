@@ -80,6 +80,26 @@ display:none}
 .route b{color:var(--fg)}
 .empty{color:var(--faint);font-style:italic}
 .ask{color:var(--amber)}
+/* live build */
+.live{padding:10px 18px;border-top:1px solid var(--line);background:var(--panel);
+display:none}
+.live.on{display:block}
+.live-head{display:flex;gap:10px;align-items:baseline;font-size:12px;margin-bottom:6px}
+.live-head b{font-size:13px}
+.spin{width:9px;height:9px;border-radius:50%;background:var(--gen);flex:none;
+animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+.spin.done{animation:none;background:var(--green)}
+.spin.bad{animation:none;background:var(--red)}
+.spin.warn{animation:none;background:var(--amber)}
+.elapsed{margin-left:auto;color:var(--faint);font-variant-numeric:tabular-nums}
+.steps{max-height:132px;overflow-y:auto;font-size:12px}
+.step{display:flex;gap:9px;padding:2px 0;align-items:baseline}
+.step .a{color:var(--dim);width:74px;flex:none;font-size:11px}
+.step .a.generator{color:var(--gen)}.step .a.auditor{color:var(--aud)}
+.step .d{color:var(--faint);margin-left:6px}
+.step.round{border-top:1px solid var(--line);margin-top:4px;padding-top:5px;
+color:var(--dim)}
 </style>
 
 <header>
@@ -103,6 +123,12 @@ display:none}
   </div>
 </main>
 
+<div class="live" id="live">
+  <div class="live-head"><span class="spin" id="spin"></span>
+    <b id="live-task">…</b><span id="live-outcome" class="empty"></span>
+    <span class="elapsed" id="live-elapsed"></span></div>
+  <div class="steps" id="steps"></div>
+</div>
 <div class="state" id="state"></div>
 <div class="route" id="route"></div>
 <form id="f" autocomplete="off">
@@ -183,10 +209,37 @@ async function draw(){
          ? '<span class="chip" style="margin-left:auto"><span class="k">toward enforced: '
            + esc(d.tier.shortfalls[0]) + '</span></span>' : '');
 
+    drawProgress(d.progress);
     for(const el of document.querySelectorAll('.scroll')) el.scrollTop = el.scrollHeight;
   }catch(e){
     document.getElementById('meta').textContent = 'disconnected — ' + e.message;
   }
+}
+
+let fast = false;
+function drawProgress(p){
+  const box = document.getElementById('live');
+  if(!p){ box.className = 'live'; fast = false; return; }
+  box.className = 'live on';
+  fast = !p.finished;
+  document.getElementById('live-task').textContent = p.task.replace(/\\s+/g, ' ').slice(0,70);
+  const spin = document.getElementById('spin');
+  spin.className = 'spin' + (!p.finished ? ''
+    : p.outcome === 'passed' ? ' done'
+    : p.outcome === 'escalated' ? ' warn' : ' bad');
+  document.getElementById('live-outcome').textContent = p.finished
+    ? (p.outcome + (p.error ? ' — ' + p.error : '')) : 'running…';
+  document.getElementById('live-elapsed').textContent = p.elapsed + 's';
+  document.getElementById('steps').innerHTML = p.steps.map(s => {
+    const isRound = s.actor === 'loop' && s.text.startsWith('round ');
+    return '<div class="step' + (isRound ? ' round' : '') + '">'
+      + '<span class="a ' + esc(s.actor) + '">' + esc(s.actor) + '</span>'
+      + '<span>' + esc(s.text)
+      + (s.detail ? '<span class="d">' + esc(s.detail) + '</span>' : '')
+      + '</span></div>';
+  }).join('');
+  const st = document.getElementById('steps');
+  st.scrollTop = st.scrollHeight;
 }
 
 const form = document.getElementById('f');
@@ -220,6 +273,10 @@ form.onsubmit = async ev => {
   draw();
 };
 
-draw(); setInterval(draw, 4000);
+// While a build is in flight the page follows it closely; otherwise it idles,
+// because polling a ledger that is not changing is just noise.
+draw();
+setInterval(() => draw(), 4000);
+setInterval(() => { if(fast) draw(); }, 1200);
 </script>
 """

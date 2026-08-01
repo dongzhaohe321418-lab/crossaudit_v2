@@ -132,12 +132,31 @@ def stop(cfg: Config) -> str:
     except (ProcessLookupError, TypeError):
         clear_run(cfg)
         return "no console was running (stale record cleared)"
-    for _ in range(30):
-        time.sleep(0.1)
-        if not responding(info["port"], info["token"]):
-            break
+    # A silent port is not a dead process. Wait for the process itself, then
+    # insist — and never clear the record while it is still alive, because that
+    # record is the only way anything can find this process again.
+    if not _gone(pid, tries=30):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, TypeError):
+            pass
+        if not _gone(pid, tries=20):
+            return (f"the console on port {info['port']} (pid {pid}) did not stop; "
+                    f"its record is kept so it can be found again")
     clear_run(cfg)
     return f"stopped the console on port {info['port']}"
+
+
+def _gone(pid: int, *, tries: int) -> bool:
+    for _ in range(tries):
+        time.sleep(0.1)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except (PermissionError, TypeError):
+            return False
+    return False
 
 
 # ------------------------------------------------------- interrupted builds

@@ -517,8 +517,13 @@ def cmd_console(args: argparse.Namespace) -> int:
           "  Ctrl-C to stop.", flush=True)
 
     def bye(*_a) -> None:
-        daemon.clear_run(cfg)
-        httpd.shutdown()
+        # shutdown() blocks until serve_forever() returns, and serve_forever() is
+        # suspended inside this very handler — calling it here deadlocks the
+        # process into an orphan that holds the port, answers nothing, and cannot
+        # be signalled again. A thread breaks the cycle.
+        import threading
+
+        threading.Thread(target=httpd.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, bye)
     try:
@@ -526,6 +531,8 @@ def cmd_console(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\n  closed")
     finally:
+        # Only once we are actually leaving. Clearing it from the handler removed
+        # the one record that could find this process, before it had died.
         daemon.clear_run(cfg)
     return EXIT_OK
 

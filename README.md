@@ -67,7 +67,7 @@ behind `init`.
 Check it:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.3 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.4 (receipt schema 2)
 ```
 
 <details>
@@ -391,6 +391,7 @@ support.
 | `HTTP 400 — it said: model: …` | the model id, not your key: this account cannot use it. Edit `model:` in `crossaudit.yml`, or re-run `crossaudit init` and pick from the list |
 | `HTTP 401 — it said: …` | the key was rejected. `crossaudit doctor` prints its length and last four characters — enough to spot a truncated paste or a key for the other vendor |
 | `HTTP 429` | the vendor's rate limit or an empty balance, not a CrossAudit limit |
+| a console you cannot reach and cannot stop | fixed in 2.7.4; a console started by an earlier version deadlocked on SIGTERM and deleted its own run record. Find it with `lsof -iTCP -sTCP:LISTEN -P \| grep python` and `kill -9` the pid |
 | `endpoint … is not this provider's built-in origin` | a custom `base_url` needs an explicit `--allow-custom-endpoint` |
 | `install mode source/editable may verify but never admit` | such an install can change its code after reporting its own digest. Install the wheel to admit |
 | the console returns 403 | wrong token, or `Host` is not localhost. Get the right URL from `crossaudit console --status` |
@@ -440,7 +441,7 @@ Three principles run through all of it:
 
 ## Status
 
-`2.7.3`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
+`2.7.4`, 191 tests. Landed: spoken-rule distillation, the six-lane router, the
 closed `build` loop, the one-shot dispute channel, domain-neutral checks,
 allowlisted check-pack plugins, the paired-repository wizard, evidence-based
 admission tiering, a live-pushed browser dashboard, and a console that outlives

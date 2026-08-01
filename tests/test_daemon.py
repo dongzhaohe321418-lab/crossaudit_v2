@@ -154,3 +154,66 @@ def test_a_running_build_keeps_the_console_alive(cfg, monkeypatch):
     finally:
         httpd.shutdown()
         daemon.clear_run(cfg)
+
+
+# ------------------------------------------- stopping a background console
+def test_the_signal_handler_never_blocks_the_loop_it_is_stopping():
+    """`shutdown()` waits for `serve_forever()` to return, and `serve_forever()`
+    is suspended inside the handler. Called there it deadlocks the process into
+    an orphan: run record deleted, port held, answering nothing, and already
+    inside the handler so a second signal changes nothing.
+
+    Nothing else in the suite fails if this is reverted, which is why it has a
+    test of its own.
+    """
+    import re
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "crossaudit" / "cli"
+           / "main.py").read_text()
+    body = re.search(r"def bye\(\*_a\) -> None:\n(.*?)signal\.signal", src, re.S).group(1)
+    assert "httpd.shutdown" in body
+    assert "Thread" in body, "shutdown() must not run on the serving thread"
+    assert "clear_run" not in body, (
+        "clearing the record from the handler orphans a process that has not died")
+
+
+def test_the_record_outlives_a_stop_that_did_not_work(cfg, monkeypatch):
+    """The run file is the only way to find the process again. Deleting it while
+    the process lives is what turns a failed stop into a permanent orphan."""
+    from crossaudit.console import daemon
+
+    daemon.write_run(cfg, pid=999999, port=1, token="t")
+    monkeypatch.setattr(daemon.os, "kill", lambda *a: None)      # signals vanish
+    monkeypatch.setattr(daemon, "_gone", lambda pid, tries: False)
+
+    said = daemon.stop(cfg)
+    assert "did not stop" in said
+    assert daemon.read_run(cfg) is not None, "the record was thrown away"
+
+
+def test_a_stop_that_worked_clears_the_record(cfg, monkeypatch):
+    from crossaudit.console import daemon
+
+    daemon.write_run(cfg, pid=999999, port=1, token="t")
+    monkeypatch.setattr(daemon.os, "kill", lambda *a: None)
+    monkeypatch.setattr(daemon, "_gone", lambda pid, tries: True)
+
+    assert "stopped" in daemon.stop(cfg)
+    assert daemon.read_run(cfg) is None
+
+
+def test_stop_escalates_when_the_polite_signal_is_ignored(cfg, monkeypatch):
+    """A daemon can inherit SIG_IGN for SIGTERM from whatever started it. The
+    stop path has to be able to insist."""
+    import signal as sig
+
+    from crossaudit.console import daemon
+
+    daemon.write_run(cfg, pid=999999, port=1, token="t")
+    sent = []
+    monkeypatch.setattr(daemon.os, "kill", lambda pid, s: sent.append(s))
+    monkeypatch.setattr(daemon, "_gone",
+                        lambda pid, tries: sig.SIGKILL in sent)
+
+    daemon.stop(cfg)
+    assert sent == [sig.SIGTERM, sig.SIGKILL]

@@ -70,7 +70,7 @@ lives behind `init`.
 验证:
 
 ```bash
-crossaudit --version     # crossaudit 2.7.3 (receipt schema 2)
+crossaudit --version     # crossaudit 2.7.4 (receipt schema 2)
 ```
 
 <details>
@@ -370,6 +370,7 @@ agent 之间**追责。
 | `HTTP 400 — it said: model: …` | 是模型 id,不是密钥:这个账号用不了它。改 `crossaudit.yml` 里的 `model:`,或重跑 `crossaudit init` 从列表里选 |
 | `HTTP 401 — it said: …` | 密钥被拒。`crossaudit doctor` 会打印它的长度和末四位——足以看出粘贴被截断,或者拿错了厂商的密钥 |
 | `HTTP 429` | 厂商的限流或余额用尽,不是 CrossAudit 的限制 |
+| 控制台既连不上也停不掉 | 2.7.4 已修;更早版本启动的控制台会在 SIGTERM 上死锁,并且已经删掉了自己的运行记录。用 `lsof -iTCP -sTCP:LISTEN -P \| grep python` 找到它,`kill -9` |
 | `endpoint … is not this provider's built-in origin` | 用了自定义 base_url,需显式 `--allow-custom-endpoint` |
 | `install mode source/editable may verify but never admit` | 可验证但不可准入——它的代码能在自报摘要后被改。装 wheel 才能准入 |
 | 控制台 403 | token 不对,或 `Host` 不是 localhost。用 `crossaudit console --status` 拿正确 URL |
@@ -411,7 +412,7 @@ pip uninstall crossaudit
 
 ## 状态 · Status
 
-`2.7.3`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
+`2.7.4`,187 个测试。已落地:对话式规则蒸馏、六车道路由器、`build` 闭环、一次性
 争议、领域中立检查包、检查包插件、双仓向导、准入档位自证、实时推送的浏览器面板、
 后台常驻与重连。未落地:enforced 档的实地证据、PyPI 发行。
 

@@ -105,6 +105,7 @@ align-items:center;justify-content:center;font-size:10px;color:#fff;flex:none}
 .when{margin-left:auto;color:var(--faint)}
 .body{margin-top:3px;white-space:pre-wrap;word-break:break-word}
 .files{margin-top:4px;font-size:11.5px;color:var(--dim);
+white-space:pre-wrap;word-break:break-word;
 font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .f{display:block}
 .dot{width:8px;height:8px;border-radius:50%;flex:none}
@@ -157,6 +158,7 @@ color:var(--dim)}
 font-size:12.5px;display:none;border-top:1px solid var(--line)}
 .warnbar.on{display:block}
 .route{padding:8px 22px;font-size:12.5px;color:var(--dim);display:none;
+white-space:pre-wrap;word-break:break-word;
 border-top:1px solid var(--line);background:var(--card)}
 .route.on{display:block}
 .route b{color:var(--fg)}

@@ -6,7 +6,7 @@ behind an explicit CLI verb.
 """
 from __future__ import annotations
 
-__version__ = "2.7.2"
+__version__ = "2.7.3"
 RECEIPT_SCHEMA = 2
 
 __all__ = ["__version__", "RECEIPT_SCHEMA"]

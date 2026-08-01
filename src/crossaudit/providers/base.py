@@ -142,13 +142,79 @@ def request_json(url: str, payload: dict, headers: dict, *, timeout: float = CON
             rid = resp.headers.get("request-id") or resp.headers.get("x-request-id")
             return json.loads(data.decode("utf-8")), rid
     except urllib.error.HTTPError as exc:
-        detail = exc.read(2048).decode("utf-8", "replace")
-        raise ProviderDenial(f"provider returned HTTP {exc.code}", status=exc.code,
-                             detail=detail[:300]) from exc
+        body = exc.read(4096).decode("utf-8", "replace")
+        raise _http_denial(exc.code, body, url) from exc
     except (urllib.error.URLError, socket.timeout, TimeoutError) as exc:
         _reraise_transport(exc)
     except json.JSONDecodeError as exc:
         raise ProviderDenial(f"provider returned non-JSON: {exc}") from exc
+
+
+# What the vendors call the thing that went wrong, and what to do about it. The
+# status alone is never enough: 400 covers a model id that does not exist, a
+# malformed request, and a key for the wrong product, and only one of those is
+# ours to fix.
+_STATUS_ADVICE = {
+    401: "the key was rejected. Check the one in your keys file is for this "
+         "vendor and not truncated — `crossaudit doctor` prints its fingerprint",
+    403: "the key is valid but not permitted here — often a workspace or a "
+         "region restriction on the account",
+    404: "the endpoint does not exist. If you set a custom base URL, check it",
+    429: "rate limited or out of credit. This is the vendor's limit, not ours",
+}
+
+
+def vendor_message(body: str) -> str:
+    """The sentence the vendor wrote, out of whatever envelope it came in.
+
+    Anthropic, OpenAI, Google and DeepSeek all nest it differently, and a reader
+    staring at "HTTP 400" needs the sentence far more than the envelope.
+    """
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body.strip()[:300]
+    node = data.get("error", data) if isinstance(data, dict) else data
+    if isinstance(node, list) and node:
+        node = node[0]
+    if isinstance(node, dict):
+        for key in ("message", "detail", "error_description", "reason"):
+            value = node.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:300]
+    return body.strip()[:300]
+
+
+def _http_denial(status: int, body: str, url: str) -> ProviderDenial:
+    said = vendor_message(body)
+    lines = [f"provider returned HTTP {status}"]
+    if said:
+        lines.append(f"  it said: {said}")
+    if status in _STATUS_ADVICE:
+        lines.append(f"  {_STATUS_ADVICE[status]}")
+    elif status == 400 and _looks_like_a_model_problem(said):
+        lines.append("  that is the model id, not your key. Set a model this "
+                     "account can use — `crossaudit init` lists the current ones, "
+                     "or edit `model:` in crossaudit.yml")
+    return ProviderDenial("\n".join(lines), status=status, detail=said,
+                          endpoint=url)
+
+
+def _looks_like_a_model_problem(said: str) -> bool:
+    """Recognise the commonest 400 there is, in the shapes vendors actually send.
+
+    Anthropic's whole message for an unknown model is `model: claude-opus-5` —
+    no "not found", nothing to match on but the field name. Others write a
+    sentence. Both have to be caught, or the advice never appears for the case
+    it exists for.
+    """
+    low = said.lower().strip()
+    if low.startswith("model:") or low.startswith("model "):
+        return True
+    return "model" in low and any(w in low for w in
+                                  ("not found", "not exist", "invalid", "unknown",
+                                   "unsupported", "does not have access", "permission",
+                                   "deprecated", "no access"))
 
 
 def _reraise_transport(exc: BaseException) -> "ProviderDenial":

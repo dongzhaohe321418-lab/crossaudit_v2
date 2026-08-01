@@ -472,3 +472,143 @@ def test_the_advice_names_the_store_actually_in_effect(monkeypatch):
     advice = base.tls_advice()
     assert "/nonexistent/cert.pem" in advice
     assert "$SSL_CERT_FILE" in advice and "← missing" in advice
+
+
+# --------------------------------------------------- what the vendor said
+@pytest.mark.parametrize("body,expect", [
+    # Anthropic
+    ('{"type":"error","error":{"type":"invalid_request_error",'
+     '"message":"model: claude-opus-9"}}', "model: claude-opus-9"),
+    # OpenAI
+    ('{"error":{"message":"The model `gpt-9` does not exist","code":"model_not_found"}}',
+     "The model `gpt-9` does not exist"),
+    # Google
+    ('{"error":{"code":400,"message":"API key not valid","status":"INVALID_ARGUMENT"}}',
+     "API key not valid"),
+    # DeepSeek / OpenAI-compatible
+    ('{"error":{"message":"Insufficient Balance","type":"unknown_error"}}',
+     "Insufficient Balance"),
+    # A gateway that returns prose, not JSON
+    ("upstream connect error", "upstream connect error"),
+])
+def test_the_vendors_sentence_survives_its_envelope(body, expect):
+    """Four vendors nest it four ways, and a reader staring at "HTTP 400" needs
+    the sentence far more than the envelope."""
+    from crossaudit.providers.base import vendor_message
+
+    assert vendor_message(body) == expect
+
+
+@pytest.mark.parametrize("said", [
+    "model: claude-opus-5",                        # Anthropic sends exactly this
+    "The model `gpt-9` does not exist",            # OpenAI
+    "models/gemini-9 is not found for API version v1beta",   # Google
+    "Model Not Exist",                             # DeepSeek
+])
+def test_the_shapes_vendors_actually_send_for_a_bad_model(said):
+    """Written from real responses, not from what the message ought to say: the
+    Anthropic one has no words to match on but the field name."""
+    from crossaudit.providers.base import _looks_like_a_model_problem
+
+    assert _looks_like_a_model_problem(said)
+
+
+@pytest.mark.parametrize("said", [
+    "messages: at least one message is required",
+    "invalid x-api-key",
+    "max_tokens: must be greater than 0",
+])
+def test_other_four_hundreds_are_not_blamed_on_the_model(said):
+    from crossaudit.providers.base import _looks_like_a_model_problem
+
+    assert not _looks_like_a_model_problem(said)
+
+
+def test_a_bad_model_id_is_not_blamed_on_the_key():
+    """The commonest 400 there is, and the one most often misread as auth."""
+    from crossaudit.providers.base import _http_denial
+
+    d = _http_denial(400, '{"error":{"message":"model: claude-opus-9 not found"}}', "u")
+    assert "claude-opus-9" in d.reason
+    assert "that is the model id, not your key" in d.reason
+    assert d.detail("status") if False else d.exit_code   # exit code stays stable
+
+
+def test_a_rejected_key_says_so_without_echoing_it():
+    from crossaudit.providers.base import _http_denial
+
+    d = _http_denial(401, '{"error":{"message":"invalid x-api-key"}}', "u")
+    assert "the key was rejected" in d.reason and "invalid x-api-key" in d.reason
+
+
+def test_rate_limiting_is_named_as_the_vendors_limit():
+    from crossaudit.providers.base import _http_denial
+
+    d = _http_denial(429, '{"error":{"message":"rate_limit_error"}}', "u")
+    assert "not ours" in d.reason
+
+
+def test_an_unrecognised_400_still_shows_what_came_back():
+    """No guess is better than swallowing the only evidence there is."""
+    from crossaudit.providers.base import _http_denial
+
+    d = _http_denial(400, '{"error":{"message":"messages: at least one required"}}', "u")
+    assert "at least one required" in d.reason
+
+
+def test_a_real_400_reaches_the_caller_intact():
+    """End to end through urllib, since the body is read from a stream that is
+    easy to consume twice or not at all."""
+    import http.server
+    import threading
+
+    from crossaudit.errors import ProviderDenial
+    from crossaudit.providers.base import request_json
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):                                    # noqa: N802
+            body = b'{"error":{"message":"model: nonesuch-1 not found"}}'
+            self.send_response(400)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):                            # keep pytest output clean
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/v1/messages"
+        with pytest.raises(ProviderDenial) as caught:
+            request_json(url, {"model": "nonesuch-1"}, {})
+        assert "nonesuch-1 not found" in caught.value.reason
+        assert "the model id, not your key" in caught.value.reason
+    finally:
+        server.shutdown()
+
+
+def test_the_browser_keeps_the_lines_of_a_multi_line_refusal():
+    """The advice is laid out in lines. Rendered without pre-wrap it collapses
+    into a run-on, which is where the part that says what to do gets lost."""
+    from crossaudit.console import page
+
+    css = page.PAGE
+    for rule in (".files{", ".route{"):
+        start = css.index(rule)
+        block = css[start:css.index("}", start)]
+        assert "pre-wrap" in block, f"{rule} would collapse the newlines"
+
+
+def test_doctor_describes_the_key_rather_than_confirming_it_exists():
+    """"is set" is true of a truncated paste too, and the vendor answers that
+    with a 401 about authentication rather than about the paste. A promise the
+    401 advice makes, so it has to be kept."""
+    src = (Path(__file__).resolve().parents[1] / "src" / "crossaudit" / "cli"
+           / "main.py").read_text()
+    assert "tui.fingerprint" in src, "doctor no longer prints the key's fingerprint"
+
+    from crossaudit.providers.base import _http_denial
+
+    assert "fingerprint" in _http_denial(401, "{}", "u").reason

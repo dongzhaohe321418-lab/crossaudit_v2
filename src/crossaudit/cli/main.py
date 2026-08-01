@@ -27,7 +27,7 @@ from ..receipt import digest as receipt_digest
 from ..receipt import load as load_receipt
 from ..receipt import verify as verify_receipt
 from ..receipt.verify import admit as admit_receipt
-from . import wizard
+from . import tui, wizard
 from .talk import cmd_routing, cmd_talk
 
 ALLOW_CUSTOM_ENV = "CROSSAUDIT_ALLOW_CUSTOM_ENDPOINT"
@@ -156,8 +156,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             os.environ[cfg.auditor.key_env] = entered
             key_present = True
             print(f"       saved; future shells: source {written}")
+    # The fingerprint, not "is set": a truncated paste is set too, and the vendor
+    # answers that with a 401 that names authentication rather than the paste.
     add("auditor key", key_present,
-        f"${cfg.auditor.key_env} " + ("is set" if key_present else "is empty"),
+        f"${cfg.auditor.key_env} " + (
+            tui.fingerprint(os.environ.get(cfg.auditor.key_env, "").strip())
+            if key_present else "is empty"),
         f"source {wizard.keys_file()} or export {cfg.auditor.key_env}")
 
     add("provider", cfg.auditor.provider in ("anthropic", "openai_compat", "replay"),
